@@ -91,6 +91,7 @@
     let batchesProcessed = 0;
     let expectedTotalFragments = 0;
     let activeTranslationMode = 'visible';
+    let pendingTranslationModeAfterCancel = null;
     let viewportScrollTimer = null;
     let viewportTranslationQueued = false;
     let viewportListenersInstalled = false;
@@ -622,6 +623,14 @@
         } finally {
             isTranslating = false;
             if (progressInterval) clearInterval(progressInterval);
+            updateTranslateAllStatusButton(lang);
+            if (pendingTranslationModeAfterCancel) {
+                const nextMode = pendingTranslationModeAfterCancel;
+                pendingTranslationModeAfterCancel = null;
+                if (!translationHasError) {
+                    startTranslation({ mode: nextMode });
+                }
+            }
         }
     }
 
@@ -1215,6 +1224,7 @@
                 }
             }
         }
+        updateTranslateAllStatusButton(lang);
         updateProgress(lang);
     }
 
@@ -1235,6 +1245,25 @@
         }).catch(err => {
             handleCancellation(lang);
         });
+    }
+
+    function handleTranslateAllStatusButtonClick(lang) {
+        if (!isTranslating || activeTranslationMode !== 'visible') {
+            return;
+        }
+        pendingTranslationModeAfterCancel = 'full';
+        handleCancelButtonClick(lang);
+    }
+
+    function updateTranslateAllStatusButton(lang) {
+        const button = statusShadowRoot?.querySelector('#translateAllStatusBtn');
+        if (!button) {
+            return;
+        }
+        button.textContent = translateAllButtonTexts[lang] || translateAllButtonTexts.en;
+        const shouldShow = isTranslating && activeTranslationMode === 'visible' && !translationCancelled;
+        button.style.display = shouldShow ? 'block' : 'none';
+        button.disabled = !shouldShow;
     }
 
     function createStatusIndicator(lang) {
@@ -1269,6 +1298,11 @@
         stats.textContent = ' ';
         const actionArea = document.createElement('div');
         actionArea.id = 'translationActionArea';
+        const translateAllStatusButton = document.createElement('button');
+        translateAllStatusButton.id = 'translateAllStatusBtn';
+        translateAllStatusButton.className = 'action-btn success full';
+        translateAllStatusButton.style.display = 'none';
+        translateAllStatusButton.addEventListener('click', () => handleTranslateAllStatusButtonClick(lang));
         const cancelButton = document.createElement('button');
         cancelButton.id = 'cancelTranslationBtn';
         cancelButton.textContent = st.cancelButton;
@@ -1279,6 +1313,7 @@
         translationStatus.appendChild(progressText);
         translationStatus.appendChild(stats);
         translationStatus.appendChild(actionArea);
+        translationStatus.appendChild(translateAllStatusButton);
         translationStatus.appendChild(cancelButton);
         statusShadowRoot.appendChild(translationStatus);
         document.body.appendChild(statusContainer);
@@ -1286,6 +1321,7 @@
             e.stopPropagation();
             minimizeStatusIndicator();
         });
+        updateTranslateAllStatusButton(lang);
     }
 
     function removeStatusIndicator() {
