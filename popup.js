@@ -18,6 +18,24 @@ const uiTranslations = {
 };
 let currentLangTexts = uiTranslations.en;
 let currentTabId = null;
+const translateAllButtonTexts = {
+    en: 'Translate All',
+    ja: '全文翻訳',
+    fr: 'Tout traduire',
+    de: 'Alles übersetzen',
+    es: 'Traducir todo',
+    it: 'Traduci tutto',
+    pt: 'Traduzir tudo',
+    ru: 'Перевести все',
+    'zh-CN': '全文翻译',
+    'zh-TW': '全文翻譯',
+    ko: '전체 번역',
+    hi: 'सभी का अनुवाद',
+    ar: 'ترجمة الكل',
+    bn: 'সব অনুবাদ',
+    id: 'Terjemahkan semua',
+    tr: 'Hepsini çevir'
+};
 
 async function initPopupUI() {
     try {
@@ -27,6 +45,7 @@ async function initPopupUI() {
         document.querySelector('.header').textContent = currentLangTexts.header;
         document.querySelector('.info').textContent = currentLangTexts.info;
         document.getElementById('translateBtn').textContent = currentLangTexts.translateBtn;
+        document.getElementById('translateAllBtn').textContent = currentLangTexts.translateAllBtn || translateAllButtonTexts[lang] || translateAllButtonTexts.en;
         document.getElementById('excludeBtn').textContent = currentLangTexts.excludeBtn;
         document.getElementById('optionsBtn').textContent = currentLangTexts.optionsBtn;
 
@@ -37,6 +56,7 @@ async function initPopupUI() {
         } else {
             document.getElementById('statusText').textContent = currentLangTexts.connectionError;
             document.getElementById('translateBtn').disabled = true;
+            document.getElementById('translateAllBtn').disabled = true;
             document.getElementById('excludeBtn').disabled = true;
         }
     } catch (error) {
@@ -49,6 +69,7 @@ async function checkTranslationStatus() {
     if (!currentTabId) return;
     document.getElementById('statusText').textContent = currentLangTexts.connecting;
     document.getElementById('translateBtn').disabled = true;
+    document.getElementById('translateAllBtn').disabled = true;
     try {
         const response = await chrome.tabs.sendMessage(currentTabId, { action: "getTranslationStatus" });
         if (response) {
@@ -59,22 +80,26 @@ async function checkTranslationStatus() {
                 }
                 document.getElementById('statusText').textContent = currentLangTexts.translationInProgress;
                 document.getElementById('translateBtn').disabled = true;
+                document.getElementById('translateAllBtn').disabled = true;
             } else {
                 hideProgress();
                 document.getElementById('statusText').textContent = '';
                 document.getElementById('translateBtn').disabled = false;
+                document.getElementById('translateAllBtn').disabled = false;
             }
             document.getElementById('excludeBtn').disabled = false;
         } else {
             hideProgress();
             document.getElementById('statusText').textContent = currentLangTexts.noResponse;
             document.getElementById('translateBtn').disabled = true;
+            document.getElementById('translateAllBtn').disabled = true;
             document.getElementById('excludeBtn').disabled = true;
         }
     } catch (error) {
         hideProgress();
         document.getElementById('statusText').textContent = currentLangTexts.noResponse;
         document.getElementById('translateBtn').disabled = true;
+        document.getElementById('translateAllBtn').disabled = true;
         document.getElementById('excludeBtn').disabled = true;
     }
 }
@@ -85,6 +110,7 @@ function showProgress(percent) {
     document.getElementById('progressFill').style.width = clampedPercent + '%';
     document.getElementById('progressText').textContent = currentLangTexts.progressText + clampedPercent.toFixed(1) + '%';
     document.getElementById('translateBtn').disabled = true;
+    document.getElementById('translateAllBtn').disabled = true;
 }
 
 function updateStats(stats) {
@@ -109,19 +135,21 @@ function hideProgress() {
     document.getElementById('progressFill').style.width = '0%';
 }
 
-async function translatePage() {
+async function translatePage(mode = 'visible') {
     if (!currentTabId) {
         document.getElementById('statusText').textContent = currentLangTexts.connectionError;
         return;
     }
     document.getElementById('statusText').textContent = currentLangTexts.connecting;
     document.getElementById('translateBtn').disabled = true;
+    document.getElementById('translateAllBtn').disabled = true;
     try {
-        const response = await chrome.tabs.sendMessage(currentTabId, { action: "startTranslationFromPopup" });
+        const response = await chrome.tabs.sendMessage(currentTabId, { action: "startTranslationFromPopup", mode });
         if (!response) {
             document.getElementById('statusText').textContent = currentLangTexts.noResponse;
             hideProgress();
             document.getElementById('translateBtn').disabled = false;
+            document.getElementById('translateAllBtn').disabled = false;
             return;
         }
         if (response.status === "starting") {
@@ -134,11 +162,13 @@ async function translatePage() {
             document.getElementById('statusText').textContent = `${currentLangTexts.translationError}: Unexpected response (${response.status})`;
             hideProgress();
             document.getElementById('translateBtn').disabled = false;
+            document.getElementById('translateAllBtn').disabled = false;
         }
     } catch (e) {
         document.getElementById('statusText').textContent = `${currentLangTexts.connectionError}`;
         hideProgress();
         document.getElementById('translateBtn').disabled = false;
+        document.getElementById('translateAllBtn').disabled = false;
     }
 }
 
@@ -174,7 +204,8 @@ async function excludeCurrentSite() {
 }
 
 document.addEventListener('DOMContentLoaded', initPopupUI);
-document.getElementById('translateBtn').addEventListener('click', translatePage);
+document.getElementById('translateBtn').addEventListener('click', () => translatePage('visible'));
+document.getElementById('translateAllBtn').addEventListener('click', () => translatePage('full'));
 document.getElementById('excludeBtn').addEventListener('click', excludeCurrentSite);
 document.getElementById('optionsBtn').addEventListener('click', function() {
     chrome.runtime.openOptionsPage();
@@ -196,6 +227,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             hideProgress();
             document.getElementById('statusText').textContent = request.message || currentLangTexts.translationComplete;
             document.getElementById('translateBtn').disabled = false;
+            document.getElementById('translateAllBtn').disabled = false;
             break;
         case "translationError":
             hideProgress();
@@ -208,11 +240,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                 document.getElementById('statusText').textContent = errorMessage;
             }
             document.getElementById('translateBtn').disabled = false;
+            document.getElementById('translateAllBtn').disabled = false;
             break;
         case "translationCancelled":
             hideProgress();
             document.getElementById('statusText').textContent = currentLangTexts.translationCancelled;
             document.getElementById('translateBtn').disabled = false;
+            document.getElementById('translateAllBtn').disabled = false;
             break;
     }
     return true;

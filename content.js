@@ -35,6 +35,24 @@
         id: { yes: 'Terjemahkan', no: 'Tidak', never: 'Jangan tampilkan untuk situs ini' },
         tr: { yes: 'Çevir', no: 'Hayır', never: 'Bu site için gösterme' }
     };
+    const translateAllButtonTexts = {
+        ja: '全文翻訳',
+        en: 'Translate All',
+        fr: 'Tout traduire',
+        de: 'Alles übersetzen',
+        es: 'Traducir todo',
+        it: 'Traduci tutto',
+        pt: 'Traduzir tudo',
+        ru: 'Перевести все',
+        'zh-CN': '全文翻译',
+        'zh-TW': '全文翻譯',
+        ko: '전체 번역',
+        hi: 'सभी का अनुवाद',
+        ar: 'ترجمة الكل',
+        bn: 'সব অনুবাদ',
+        id: 'Terjemahkan semua',
+        tr: 'Hepsini çevir'
+    };
     const statusTranslations = {
         en: { translating: 'Translating...', cancelling: 'Cancelling...', translationCancelled: 'Translation cancelled.', noTextFound: 'No text found to translate', translationCompleted: 'Translation completed', errorOccurred: 'An error occurred', apiLimitError: 'API request limit reached. Please try again later, or adjust settings.', progressTemplate: 'Batches: {currentBatch}/{totalBatch}, Fragments: {translatedFragments}/{expected}', closeButton: 'Close', cancelButton: 'Cancel', openOptions: 'Open Options' },
         ja: { translating: '翻訳中...', cancelling: '停止処理中...', translationCancelled: '翻訳を中止しました。', noTextFound: '翻訳するテキストが見つかりませんでした', translationCompleted: '翻訳が完了しました', errorOccurred: 'エラーが発生しました', apiLimitError: 'APIリクエスト制限に達しました。しばらく待つか、設定を調整してください。', progressTemplate: 'バッチ: {currentBatch}/{totalBatch}, テキスト断片: {translatedFragments}/{expected}', closeButton: '閉じる', cancelButton: '中止', openOptions: 'オプションを開く' },
@@ -63,6 +81,7 @@
     let totalBatches = 0;
     let batchesProcessed = 0;
     let expectedTotalFragments = 0;
+    let activeTranslationMode = 'visible';
 
     let textNodeInfos = new WeakMap();
     let activeObservers = [];
@@ -95,7 +114,7 @@
 
                 const translationStarter = () => {
                     if (isTranslating) return;
-                    startTranslation();
+                    startTranslation({ mode: 'full' });
                 }
 
                 if (items.realTimeTranslation === true) {
@@ -156,6 +175,7 @@
         if (promptContainer || document.getElementById('gemini-translator-prompt-container')) return;
         const promptMsg = promptMessages[lang] || promptMessages.en;
         const btnTexts = translateButtonTexts[lang] || translateButtonTexts.en;
+        const allButtonText = translateAllButtonTexts[lang] || translateAllButtonTexts.en;
         promptContainer = document.createElement('div');
         promptContainer.id = 'gemini-translator-prompt-container';
         promptContainer.style.position = 'fixed';
@@ -164,7 +184,7 @@
         promptContainer.style.zIndex = '2147483647';
         promptShadowRoot = promptContainer.attachShadow({ mode: 'open' });
         const style = document.createElement('style');
-        style.textContent = `.prompt { position: fixed !important; top: 20px !important; right: 20px !important; z-index: 2147483647 !important; background-color: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); color: black; font-family: Arial, sans-serif; max-width: 250px; text-align: center; font-size: 14px; } .prompt-text { margin-bottom: 10px; word-wrap: break-word; } .prompt-buttons { display: flex; justify-content: space-between; gap: 10px; } .prompt-buttons button { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; flex-grow: 1; } #translate-yes { background-color: #4285f4; color: white; } #translate-yes:hover { background-color: #3367d6; } #translate-no { background-color: #f5f5f5; color: #333; } #translate-no:hover { background-color: #e0e0e0; } #translate-never { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; width: 100%; margin-top: 10px; background-color: #f5f5f5; color: #333; box-sizing: border-box; } #translate-never:hover { background-color: #e0e0e0; }`;
+        style.textContent = `.prompt { position: fixed !important; top: 20px !important; right: 20px !important; z-index: 2147483647 !important; background-color: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); color: black; font-family: Arial, sans-serif; max-width: 270px; text-align: center; font-size: 14px; } .prompt-text { margin-bottom: 10px; word-wrap: break-word; } .prompt-buttons { display: flex; flex-wrap: wrap; gap: 8px; } .prompt-buttons button { padding: 8px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; flex: 1 1 70px; box-sizing: border-box; } #translate-yes { background-color: #4285f4; color: white; } #translate-yes:hover { background-color: #3367d6; } #translate-all { background-color: #34a853; color: white; } #translate-all:hover { background-color: #2e8b46; } #translate-no { background-color: #f5f5f5; color: #333; } #translate-no:hover { background-color: #e0e0e0; } #translate-never { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; width: 100%; margin-top: 10px; background-color: #f5f5f5; color: #333; box-sizing: border-box; } #translate-never:hover { background-color: #e0e0e0; }`;
         promptShadowRoot.appendChild(style);
         const promptDiv = document.createElement('div');
         promptDiv.className = 'prompt';
@@ -176,10 +196,14 @@
         const yesButton = document.createElement('button');
         yesButton.id = 'translate-yes';
         yesButton.textContent = btnTexts.yes;
+        const allButton = document.createElement('button');
+        allButton.id = 'translate-all';
+        allButton.textContent = allButtonText;
         const noButton = document.createElement('button');
         noButton.id = 'translate-no';
         noButton.textContent = btnTexts.no;
         buttonsDiv.appendChild(yesButton);
+        buttonsDiv.appendChild(allButton);
         buttonsDiv.appendChild(noButton);
         const neverButton = document.createElement('button');
         neverButton.id = 'translate-never';
@@ -192,7 +216,12 @@
         yesButton.addEventListener('click', function() {
             removePrompt();
             translationStarted = true;
-            startTranslation();
+            startTranslation({ mode: 'visible' });
+        });
+        allButton.addEventListener('click', function() {
+            removePrompt();
+            translationStarted = true;
+            startTranslation({ mode: 'full' });
         });
         noButton.addEventListener('click', function() {
             removePrompt();
@@ -262,7 +291,7 @@
                 clearTimeout(observerDebounceTimer);
                 observerDebounceTimer = setTimeout(() => {
                     if (translationStarted && !isTranslating && !translationCancelled) {
-                        startTranslation();
+                        startTranslation({ mode: activeTranslationMode });
                     }
                 }, 500);
             }
@@ -303,9 +332,10 @@
         } catch (error) {}
     }
 
-    async function startTranslation() {
+    async function startTranslation(options = {}) {
         if (isTranslating) return;
         isTranslating = true;
+        translationStarted = true;
         translationCancelled = false;
         translationHasError = false;
         translatedFragmentsCount = 0;
@@ -315,6 +345,8 @@
         translationProgress = 0;
         domUpdateQueue = [];
         isApplyingUpdates = false;
+        const translationMode = options.mode === 'full' ? 'full' : 'visible';
+        activeTranslationMode = translationMode;
         let lang = 'en';
         try {
             const config = await new Promise(resolve => {
@@ -330,9 +362,16 @@
                 removeStatusIndicator();
                 return;
             }
-            expectedTotalFragments = textFragments.length;
+            const selectedFragments = selectTextFragmentsForTranslation(textFragments, translationMode);
+            if (selectedFragments.length === 0) {
+                isTranslating = false;
+                chrome.runtime.sendMessage({ action: "translationComplete", message: st.noTextFound });
+                removeStatusIndicator();
+                return;
+            }
+            expectedTotalFragments = selectedFragments.length;
 
-            const subBatches = createSubBatches(textFragments, config.batchSize || 80, config.maxBatchLength || 5000);
+            const subBatches = createSubBatches(selectedFragments, config.batchSize || 80, config.maxBatchLength || 5000);
             totalBatches = subBatches.length;
 
             if (config.showProgressPopup !== false) {
@@ -553,6 +592,7 @@
         const fragments = [];
         fragmentNodeMap.clear();
         let fragmentId = 0;
+        let traversalIndex = 0;
 
         function traverse(rootNode) {
             const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT, null, false);
@@ -560,9 +600,14 @@
             while (node = walker.nextNode()) {
                 const nodeInfo = textNodeInfos.get(node);
                 if (nodeInfo && nodeInfo.status === 'pending' && isTranslateableTextNode(node.textContent)) {
+                    const paragraphElement = getParagraphContainer(node);
+                    const rect = getNodeTextRect(node);
                     const fragment = {
                         id: `fragment_${fragmentId++}`,
-                        text: nodeInfo.originalText
+                        text: nodeInfo.originalText,
+                        order: traversalIndex++,
+                        paragraphElement,
+                        rect
                     };
                     fragments.push(fragment);
                     fragmentNodeMap.set(fragment.id, node);
@@ -666,6 +711,129 @@
             return false;
         }
         return true;
+    }
+
+    function isBlockLikeElement(element) {
+        if (!element || !(element instanceof Element)) return false;
+        const tagName = element.tagName;
+        if (['P', 'LI', 'BLOCKQUOTE', 'ARTICLE', 'SECTION', 'NAV', 'ASIDE', 'MAIN', 'HEADER', 'FOOTER', 'ADDRESS', 'PRE', 'TD', 'TH', 'FIGCAPTION', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(tagName)) {
+            return true;
+        }
+        const style = window.getComputedStyle(element);
+        return ['block', 'list-item', 'flow-root', 'table', 'table-cell', 'flex', 'grid'].includes(style.display);
+    }
+
+    function getParagraphContainer(node) {
+        let current = node?.parentElement || null;
+        let fallback = current || document.body;
+        while (current && current !== document.body) {
+            if (isBlockLikeElement(current)) {
+                return current;
+            }
+            fallback = current;
+            current = current.parentElement;
+        }
+        return fallback || document.body;
+    }
+
+    function getNodeTextRect(node) {
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const rect = range.getBoundingClientRect();
+            if (rect && (rect.width > 0 || rect.height > 0)) {
+                return rect;
+            }
+        } catch (error) {}
+        return null;
+    }
+
+    function mergeRects(rects) {
+        if (!rects || rects.length === 0) return null;
+        let top = Infinity;
+        let left = Infinity;
+        let right = -Infinity;
+        let bottom = -Infinity;
+        for (const rect of rects) {
+            if (!rect) continue;
+            top = Math.min(top, rect.top);
+            left = Math.min(left, rect.left);
+            right = Math.max(right, rect.right);
+            bottom = Math.max(bottom, rect.bottom);
+        }
+        if (!isFinite(top) || !isFinite(left) || !isFinite(right) || !isFinite(bottom)) {
+            return null;
+        }
+        return { top, left, right, bottom };
+    }
+
+    function intersectsViewport(rect, margin = 0) {
+        if (!rect) return false;
+        return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
+    }
+
+    function distanceToViewport(rect) {
+        if (!rect) return Number.POSITIVE_INFINITY;
+        if (intersectsViewport(rect, 0)) return 0;
+        if (rect.bottom < 0) return Math.abs(rect.bottom);
+        if (rect.top > window.innerHeight) return rect.top - window.innerHeight;
+        return 0;
+    }
+
+    function selectTextFragmentsForTranslation(fragments, mode) {
+        const orderedFragments = [...fragments].sort((a, b) => a.order - b.order);
+        if (mode === 'full') {
+            return orderedFragments;
+        }
+
+        const groups = [];
+        const groupMap = new Map();
+        for (const fragment of orderedFragments) {
+            const key = fragment.paragraphElement || document.body;
+            let group = groupMap.get(key);
+            if (!group) {
+                group = {
+                    key,
+                    fragments: [],
+                    rects: [],
+                    index: groups.length
+                };
+                groupMap.set(key, group);
+                groups.push(group);
+            }
+            group.fragments.push(fragment);
+            if (fragment.rect) {
+                group.rects.push(fragment.rect);
+            }
+        }
+
+        const viewportMargin = 160;
+        for (const group of groups) {
+            group.bounds = mergeRects(group.rects);
+            group.visible = intersectsViewport(group.bounds, viewportMargin);
+            group.distance = distanceToViewport(group.bounds);
+        }
+
+        let selectedIndices = groups.filter(group => group.visible).map(group => group.index);
+        if (selectedIndices.length === 0 && groups.length > 0) {
+            const nearestGroup = groups
+                .filter(group => Number.isFinite(group.distance))
+                .sort((a, b) => a.distance - b.distance)[0] || groups[0];
+            if (nearestGroup) {
+                selectedIndices = [nearestGroup.index];
+            }
+        }
+
+        if (selectedIndices.length === 0) {
+            return orderedFragments;
+        }
+
+        const beforeContext = 2;
+        const afterContext = 2;
+        const startIndex = Math.max(0, Math.min(...selectedIndices) - beforeContext);
+        const endIndex = Math.min(groups.length - 1, Math.max(...selectedIndices) + afterContext);
+        const allowedGroups = new Set(groups.slice(startIndex, endIndex + 1).map(group => group.key));
+        return orderedFragments.filter(fragment => allowedGroups.has(fragment.paragraphElement || document.body));
     }
 
     async function processBatch(batch, targetLanguage, apiProvider, lang) {
@@ -1083,7 +1251,7 @@
                         removePrompt();
                         if (!isTranslating) {
                             translationStarted = true;
-                            startTranslation();
+                            startTranslation({ mode: request.mode === 'full' ? 'full' : 'visible' });
                             sendResponse({ status: "starting" });
                         } else {
                             sendResponse({ status: "alreadyTranslating" });
