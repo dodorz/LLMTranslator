@@ -34,14 +34,12 @@
       <label id="providerTypeLabel" for="providerType">Request Template:</label>
       <select id="providerType">
         <option value="gemini">Gemini</option>
-        <option value="openai">OpenAI-compatible</option>
-        <option value="deepseek">DeepSeek-compatible</option>
+        <option value="openai">OpenAI-compatible (OpenAI / DeepSeek / xAI)</option>
         <option value="anthropic">Anthropic-compatible</option>
-        <option value="xai">xAI-compatible</option>
         <option value="ollama">Ollama-compatible</option>
         <option value="lmstudio">LM Studio-compatible</option>
       </select>
-      <p class="help-text" id="providerTypeHelp">The API shape used when sending translation requests.</p>
+      <p class="help-text" id="providerTypeHelp">The API shape used when sending translation requests. OpenAI-compatible also covers DeepSeek and xAI style endpoints.</p>
     </div>
 
     <div class="form-group">

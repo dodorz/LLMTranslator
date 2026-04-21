@@ -59,10 +59,8 @@ const BUILTIN_PROVIDER_TEMPLATES = {
 
 const PROVIDER_TYPE_OPTIONS = [
     { value: 'gemini', label: 'Gemini' },
-    { value: 'openai', label: 'OpenAI-compatible' },
-    { value: 'deepseek', label: 'DeepSeek-compatible' },
+    { value: 'openai', label: 'OpenAI-compatible (OpenAI / DeepSeek / xAI)' },
     { value: 'anthropic', label: 'Anthropic-compatible' },
-    { value: 'xai', label: 'xAI-compatible' },
     { value: 'ollama', label: 'Ollama-compatible' },
     { value: 'lmstudio', label: 'LM Studio-compatible' }
 ];
@@ -184,6 +182,9 @@ function normalizeProviderConfig(config, index) {
 }
 
 function normalizeProviderType(type) {
+    if (type === 'deepseek' || type === 'xai') {
+        return 'openai';
+    }
     return PROVIDER_TYPE_OPTIONS.some(option => option.value === type) ? type : 'openai';
 }
 
@@ -642,7 +643,7 @@ function updateUiText() {
     document.getElementById('providerNameLabel').textContent = 'Provider Name:';
     document.getElementById('providerNameHelp').textContent = 'Display name shown in the provider list.';
     document.getElementById('providerTypeLabel').textContent = 'Request Template:';
-    document.getElementById('providerTypeHelp').textContent = 'The API shape used when sending translation requests.';
+    document.getElementById('providerTypeHelp').textContent = 'The API shape used when sending translation requests. OpenAI-compatible also covers DeepSeek and xAI style endpoints.';
     document.getElementById('providerApiKeyLabel').textContent = 'API Key:';
     document.getElementById('providerApiKeyHelp').textContent = 'Stored locally in the browser.';
     document.getElementById('providerEndpointLabel').textContent = 'HTTP Endpoint URL:';
