@@ -82,6 +82,9 @@
     let batchesProcessed = 0;
     let expectedTotalFragments = 0;
     let activeTranslationMode = 'visible';
+    let viewportScrollTimer = null;
+    let viewportTranslationQueued = false;
+    let viewportListenersInstalled = false;
 
     let textNodeInfos = new WeakMap();
     let activeObservers = [];
@@ -105,6 +108,7 @@
                 try {
                     initializeTextNodeMap();
                     watchForNewText();
+                    installViewportTranslationListeners();
                 } catch (initError) {}
 
                 const pageLang = getPageLanguage();
@@ -332,12 +336,50 @@
         } catch (error) {}
     }
 
+    function installViewportTranslationListeners() {
+        if (viewportListenersInstalled) return;
+        viewportListenersInstalled = true;
+
+        const queueViewportTranslation = () => {
+            if (!translationStarted || translationCancelled || activeTranslationMode !== 'visible') {
+                return;
+            }
+            viewportTranslationQueued = true;
+            clearTimeout(viewportScrollTimer);
+            viewportScrollTimer = setTimeout(() => {
+                viewportScrollTimer = null;
+                if (!translationStarted || translationCancelled || activeTranslationMode !== 'visible') {
+                    return;
+                }
+                if (isTranslating) {
+                    viewportTranslationQueued = true;
+                    return;
+                }
+                viewportTranslationQueued = false;
+                startTranslation({ mode: 'visible' });
+            }, 350);
+        };
+
+        window.addEventListener('scroll', queueViewportTranslation, { passive: true });
+        window.addEventListener('resize', queueViewportTranslation, { passive: true });
+        window.addEventListener('orientationchange', queueViewportTranslation, { passive: true });
+        document.addEventListener('scroll', queueViewportTranslation, true);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                queueViewportTranslation();
+            }
+        });
+    }
+
     async function startTranslation(options = {}) {
         if (isTranslating) return;
         isTranslating = true;
         translationStarted = true;
         translationCancelled = false;
         translationHasError = false;
+        viewportTranslationQueued = false;
+        clearTimeout(viewportScrollTimer);
+        viewportScrollTimer = null;
         translatedFragmentsCount = 0;
         totalBatches = 0;
         batchesProcessed = 0;
@@ -546,6 +588,9 @@
 
     function handleCancellation(lang) {
         translationCancelled = true;
+        viewportTranslationQueued = false;
+        clearTimeout(viewportScrollTimer);
+        viewportScrollTimer = null;
         const st = statusTranslations[lang] || statusTranslations.en;
         if (progressInterval) {
             clearInterval(progressInterval);
@@ -1181,6 +1226,18 @@
             clearInterval(progressInterval);
             progressInterval = null;
         }
+
+        if (activeTranslationMode === 'visible' && translationStarted && !translationCancelled && viewportTranslationQueued) {
+            viewportTranslationQueued = false;
+            isTranslating = false;
+            setTimeout(() => {
+                if (translationStarted && !isTranslating && !translationCancelled && activeTranslationMode === 'visible') {
+                    startTranslation({ mode: 'visible' });
+                }
+            }, 0);
+            return;
+        }
+
         updateProgress(lang, 100);
         if (statusShadowRoot) {
             const headerElem = statusShadowRoot.querySelector('#translationHeaderText');
