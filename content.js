@@ -53,6 +53,15 @@
         id: 'Terjemahkan semua',
         tr: 'Hepsini çevir'
     };
+    const builtInProviderNames = {
+        gemini: 'Gemini',
+        openai: 'OpenAI',
+        deepseek: 'DeepSeek',
+        anthropic: 'Anthropic',
+        xai: 'xAI',
+        ollama: 'Ollama',
+        lmstudio: 'LM Studio'
+    };
     const statusTranslations = {
         en: { translating: 'Translating...', cancelling: 'Cancelling...', translationCancelled: 'Translation cancelled.', noTextFound: 'No text found to translate', translationCompleted: 'Translation completed', errorOccurred: 'An error occurred', apiLimitError: 'API request limit reached. Please try again later, or adjust settings.', progressTemplate: 'Batches: {currentBatch}/{totalBatch}, Fragments: {translatedFragments}/{expected}', closeButton: 'Close', cancelButton: 'Cancel', openOptions: 'Open Options' },
         ja: { translating: '翻訳中...', cancelling: '停止処理中...', translationCancelled: '翻訳を中止しました。', noTextFound: '翻訳するテキストが見つかりませんでした', translationCompleted: '翻訳が完了しました', errorOccurred: 'エラーが発生しました', apiLimitError: 'APIリクエスト制限に達しました。しばらく待つか、設定を調整してください。', progressTemplate: 'バッチ: {currentBatch}/{totalBatch}, テキスト断片: {translatedFragments}/{expected}', closeButton: '閉じる', cancelButton: '中止', openOptions: 'オプションを開く' },
@@ -98,6 +107,8 @@
     let fragmentNodeMap = new Map();
     let domUpdateQueue = [];
     let isApplyingUpdates = false;
+    let providerEntries = [];
+    let activeProviderId = '';
 
     const observerConfig = { childList: true, subtree: true };
 
@@ -175,53 +186,156 @@
         return null;
     }
 
-    function createTranslationPrompt(lang) {
-        if (promptContainer || document.getElementById('gemini-translator-prompt-container')) return;
+    function clearStatusActions() {
+        const actions = statusShadowRoot?.querySelector('#translationActionArea');
+        if (actions) {
+            actions.innerHTML = '';
+            actions.style.display = 'none';
+        }
+    }
+
+    function getProviderLabel(lang) {
+        if (lang === 'zh-CN') return '选择 LLM 后立即翻译';
+        if (lang === 'zh-TW') return '選擇 LLM 後立即翻譯';
+        if (lang === 'ja') return 'LLM を選ぶとすぐ翻訳';
+        return 'Choose LLM to translate now';
+    }
+
+    function normalizeProviderEntries(providerConfigs, apiProvider) {
+        const entries = [];
+        if (Array.isArray(providerConfigs) && providerConfigs.length > 0) {
+            providerConfigs.forEach((provider, index) => {
+                const id = String(provider?.id || '').trim() || `provider-${index + 1}`;
+                const name = String(provider?.name || builtInProviderNames[provider?.type] || id).trim() || id;
+                entries.push({ id, name });
+            });
+            return entries;
+        }
+
+        Object.keys(builtInProviderNames).forEach(id => {
+            entries.push({ id, name: builtInProviderNames[id] });
+        });
+
+        if (apiProvider && !entries.some(entry => entry.id === apiProvider)) {
+            entries.unshift({ id: apiProvider, name: apiProvider });
+        }
+        return entries;
+    }
+
+    async function setActiveProvider(providerId) {
+        if (!providerId) return;
+        activeProviderId = providerId;
+        const chips = statusShadowRoot?.querySelectorAll('.provider-chip');
+        if (chips) {
+            chips.forEach(chip => {
+                const isActive = chip.dataset.providerId === providerId;
+                chip.classList.toggle('active', isActive);
+                chip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            });
+        }
+        try {
+            await chrome.storage.local.set({ apiProvider: providerId });
+        } catch (error) {}
+    }
+
+    function renderProviderSelector(lang, providerConfigs, apiProvider, actions) {
+        providerEntries = normalizeProviderEntries(providerConfigs, apiProvider);
+        activeProviderId = providerEntries.some(entry => entry.id === apiProvider)
+            ? apiProvider
+            : (providerEntries[0]?.id || '');
+
+        const providerSection = document.createElement('div');
+        providerSection.className = 'provider-section';
+
+        const providerLabel = document.createElement('div');
+        providerLabel.className = 'provider-label';
+        providerLabel.textContent = getProviderLabel(lang);
+        providerSection.appendChild(providerLabel);
+
+        const providerGrid = document.createElement('div');
+        providerGrid.className = 'provider-grid';
+
+        providerEntries.forEach(entry => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `provider-chip${entry.id === activeProviderId ? ' active' : ''}`;
+            button.dataset.providerId = entry.id;
+            button.setAttribute('aria-pressed', entry.id === activeProviderId ? 'true' : 'false');
+            button.textContent = entry.name;
+            button.addEventListener('click', async function() {
+                await setActiveProvider(entry.id);
+                removePrompt();
+                translationStarted = true;
+                startTranslation({ mode: 'visible' });
+            });
+            providerGrid.appendChild(button);
+        });
+
+        providerSection.appendChild(providerGrid);
+        actions.appendChild(providerSection);
+
+        if (activeProviderId && activeProviderId !== apiProvider) {
+            chrome.storage.local.set({ apiProvider: activeProviderId }).catch(() => {});
+        }
+    }
+
+    async function createTranslationPrompt(lang) {
+        if (isTranslating) return;
+        createStatusIndicator(lang);
+        const { providerConfigs, apiProvider } = await chrome.storage.local.get(['providerConfigs', 'apiProvider']);
         const promptMsg = promptMessages[lang] || promptMessages.en;
-        const btnTexts = translateButtonTexts[lang] || translateButtonTexts.en;
         const allButtonText = translateAllButtonTexts[lang] || translateAllButtonTexts.en;
-        promptContainer = document.createElement('div');
-        promptContainer.id = 'gemini-translator-prompt-container';
-        promptContainer.style.position = 'fixed';
-        promptContainer.style.top = '20px';
-        promptContainer.style.right = '20px';
-        promptContainer.style.zIndex = '2147483647';
-        promptShadowRoot = promptContainer.attachShadow({ mode: 'open' });
-        const style = document.createElement('style');
-        style.textContent = `.prompt { position: fixed !important; top: 20px !important; right: 20px !important; z-index: 2147483647 !important; background-color: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); color: black; font-family: Arial, sans-serif; max-width: 270px; text-align: center; font-size: 14px; } .prompt-text { margin-bottom: 10px; word-wrap: break-word; } .prompt-buttons { display: flex; flex-wrap: wrap; gap: 8px; } .prompt-buttons button { padding: 8px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; flex: 1 1 70px; box-sizing: border-box; } #translate-yes { background-color: #4285f4; color: white; } #translate-yes:hover { background-color: #3367d6; } #translate-all { background-color: #34a853; color: white; } #translate-all:hover { background-color: #2e8b46; } #translate-no { background-color: #f5f5f5; color: #333; } #translate-no:hover { background-color: #e0e0e0; } #translate-never { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; width: 100%; margin-top: 10px; background-color: #f5f5f5; color: #333; box-sizing: border-box; } #translate-never:hover { background-color: #e0e0e0; }`;
-        promptShadowRoot.appendChild(style);
-        const promptDiv = document.createElement('div');
-        promptDiv.className = 'prompt';
-        const textDiv = document.createElement('div');
-        textDiv.className = 'prompt-text';
-        textDiv.textContent = promptMsg;
-        const buttonsDiv = document.createElement('div');
-        buttonsDiv.className = 'prompt-buttons';
-        const yesButton = document.createElement('button');
-        yesButton.id = 'translate-yes';
-        yesButton.textContent = btnTexts.yes;
+        const btnTexts = translateButtonTexts[lang] || translateButtonTexts.en;
+        const headerElem = statusShadowRoot?.querySelector('#translationHeaderText');
+        const promptTextElem = statusShadowRoot?.querySelector('#translationPromptText');
+        const progressBar = statusShadowRoot?.querySelector('.progress-bar');
+        const progressText = statusShadowRoot?.querySelector('#translationProgressText');
+        const statsElem = statusShadowRoot?.querySelector('#translationStats');
+        const cancelButton = statusShadowRoot?.querySelector('#cancelTranslationBtn');
+        const closeButton = statusShadowRoot?.querySelector('.close-status-btn');
+        const minimizeButton = statusShadowRoot?.querySelector('#minimizeStatusBtn');
+        const actions = statusShadowRoot?.querySelector('#translationActionArea');
+
+        if (!actions) return;
+
+        if (headerElem) headerElem.textContent = promptMsg;
+        if (promptTextElem) {
+            promptTextElem.textContent = '';
+            promptTextElem.style.display = 'none';
+        }
+        if (progressBar) progressBar.style.display = 'none';
+        if (progressText) progressText.style.display = 'none';
+        if (statsElem) statsElem.style.display = 'none';
+        if (cancelButton) cancelButton.style.display = 'none';
+        if (closeButton) closeButton.remove();
+        if (minimizeButton) minimizeButton.style.display = 'none';
+
+        clearStatusActions();
+        actions.style.display = 'flex';
+        renderProviderSelector(lang, providerConfigs, apiProvider, actions);
+
         const allButton = document.createElement('button');
         allButton.id = 'translate-all';
+        allButton.className = 'action-btn success';
         allButton.textContent = allButtonText;
+
         const noButton = document.createElement('button');
         noButton.id = 'translate-no';
+        noButton.className = 'action-btn subtle';
         noButton.textContent = btnTexts.no;
-        buttonsDiv.appendChild(yesButton);
-        buttonsDiv.appendChild(allButton);
-        buttonsDiv.appendChild(noButton);
+
         const neverButton = document.createElement('button');
         neverButton.id = 'translate-never';
+        neverButton.className = 'action-btn subtle full';
         neverButton.textContent = btnTexts.never;
-        promptDiv.appendChild(textDiv);
-        promptDiv.appendChild(buttonsDiv);
-        promptDiv.appendChild(neverButton);
-        promptShadowRoot.appendChild(promptDiv);
-        document.body.appendChild(promptContainer);
-        yesButton.addEventListener('click', function() {
-            removePrompt();
-            translationStarted = true;
-            startTranslation({ mode: 'visible' });
-        });
+
+        const secondaryRow = document.createElement('div');
+        secondaryRow.className = 'prompt-secondary-row';
+        secondaryRow.appendChild(allButton);
+        secondaryRow.appendChild(noButton);
+        secondaryRow.appendChild(neverButton);
+        actions.appendChild(secondaryRow);
+
         allButton.addEventListener('click', function() {
             removePrompt();
             translationStarted = true;
@@ -244,8 +358,9 @@
     }
 
     function removePrompt() {
-        if (promptContainer && promptContainer.parentNode) {
-            promptContainer.parentNode.removeChild(promptContainer);
+        clearStatusActions();
+        if (!isTranslating) {
+            removeStatusIndicator();
         }
         promptContainer = null;
         promptShadowRoot = null;
@@ -1013,11 +1128,21 @@
             if (minimizedDiv) minimizedDiv.remove();
             const cancelButton = statusShadowRoot?.querySelector('#cancelTranslationBtn');
             const progressBar = statusShadowRoot?.querySelector('.progress-bar');
+            const progressText = statusShadowRoot?.querySelector('#translationProgressText');
+            const statsElem = statusShadowRoot?.querySelector('#translationStats');
+            const promptTextElem = statusShadowRoot?.querySelector('#translationPromptText');
             const headerElem = statusShadowRoot?.querySelector('#translationHeaderText');
             const closeButton = statusShadowRoot?.querySelector('.close-status-btn');
             const minimizeButton = statusShadowRoot?.querySelector('#minimizeStatusBtn');
+            clearStatusActions();
             if (headerElem) headerElem.textContent = st.translating;
+            if (promptTextElem) {
+                promptTextElem.textContent = '';
+                promptTextElem.style.display = 'none';
+            }
             if (progressBar) progressBar.style.display = 'block';
+            if (progressText) progressText.style.display = 'block';
+            if (statsElem) statsElem.style.display = 'block';
             if (closeButton) closeButton.remove();
             if (minimizeButton) minimizeButton.style.display = 'inline';
             if (cancelButton) {
@@ -1087,13 +1212,15 @@
         statusShadowRoot = statusContainer.attachShadow({ mode: 'open' });
         const st = statusTranslations[lang] || statusTranslations.en;
         const style = document.createElement('style');
-        style.textContent = `.status { position: fixed !important; bottom: 10px !important; right: 10px !important; z-index: 2147483647 !important; background-color: white; border: 1px solid #ddd; border-radius: 5px; padding: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); font-family: Arial, sans-serif; color: #000; width: 250px; height: auto; min-height: 120px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; } .progress-bar { width: 100%; height: 10px; background-color: #f0f0f0; border-radius: 5px; overflow: hidden; margin-top: 10px; } .progress-fill { height: 100%; width: 0%; background-color: #4285f4; transition: width 0.3s; } #translationProgressText { margin-top: 5px; color: #000; font-size: 12px; } #translationStatusHeader { display: flex; justify-content: space-between; align-items: center; font-weight: bold; width: 100%; margin-bottom: 5px;} #minimizeStatusBtn { border: none; background: none; padding: 0; margin: 0; cursor: pointer; font-size: 16px; line-height: 1; color: #888; } #minimizeStatusBtn:hover { color: #000; } .stats { font-size: 12px; color: #666; margin-top: 5px; margin-bottom: 5px; text-align: center; } #cancelTranslationBtn { background-color: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-top: 8px; display: block; width: 100%; box-sizing: border-box; } #cancelTranslationBtn:hover { background-color: #d32f2f; } #cancelTranslationBtn:disabled { background-color: #cccccc; cursor: not-allowed; } .close-status-btn { margin-top: 10px; padding: 5px 10px; background-color: #4285f4; color: white; border: none; border-radius: 4px; cursor: pointer; width: 100%; box-sizing: border-box; font-size: 12px; } .close-status-btn:hover { background-color: #3367d6; }`;
+        style.textContent = `.status { position: fixed !important; bottom: 10px !important; right: 10px !important; z-index: 2147483647 !important; background-color: white; border: 1px solid #ddd; border-radius: 8px; padding: 12px; box-shadow: 0 4px 18px rgba(0,0,0,0.14); font-family: Arial, sans-serif; color: #000; width: 290px; height: auto; min-height: 120px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; gap: 8px; } .progress-bar { width: 100%; height: 10px; background-color: #f0f0f0; border-radius: 5px; overflow: hidden; margin-top: 2px; } .progress-fill { height: 100%; width: 0%; background-color: #4285f4; transition: width 0.3s; } #translationPromptText { color: #444; font-size: 13px; line-height: 1.45; display: none; } #translationProgressText { color: #000; font-size: 12px; } #translationStatusHeader { display: flex; justify-content: space-between; align-items: center; font-weight: bold; width: 100%; margin-bottom: 2px; } #minimizeStatusBtn { border: none; background: none; padding: 0; margin: 0; cursor: pointer; font-size: 16px; line-height: 1; color: #888; } #minimizeStatusBtn:hover { color: #000; } .stats { font-size: 12px; color: #666; text-align: center; } #translationActionArea { display: none; flex-direction: column; gap: 10px; } .provider-section { display: flex; flex-direction: column; gap: 8px; } .provider-label { font-size: 12px; color: #555; text-align: left; } .provider-grid { display: flex; flex-wrap: wrap; gap: 8px; } .provider-chip { border: 1px solid #cfd6e4; border-radius: 999px; background: white; color: #2b3a55; cursor: pointer; font-size: 12px; padding: 7px 10px; flex: 1 1 84px; box-sizing: border-box; } .provider-chip:hover { background: #eef4ff; border-color: #8aa8e8; } .provider-chip.active { background: #2f6feb; border-color: #2f6feb; color: white; } .prompt-secondary-row { display: flex; flex-wrap: wrap; gap: 8px; } .action-btn { border: none; border-radius: 6px; cursor: pointer; font-size: 13px; padding: 8px 10px; flex: 1 1 78px; box-sizing: border-box; } .action-btn.success { background-color: #34a853; color: white; } .action-btn.success:hover { background-color: #2e8b46; } .action-btn.subtle { background-color: #f5f5f5; color: #333; } .action-btn.subtle:hover { background-color: #e0e0e0; } .action-btn.full { flex-basis: 100%; } #cancelTranslationBtn { background-color: #f44336; color: white; border: none; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; display: block; width: 100%; box-sizing: border-box; } #cancelTranslationBtn:hover { background-color: #d32f2f; } #cancelTranslationBtn:disabled { background-color: #cccccc; cursor: not-allowed; } .close-status-btn { margin-top: 2px; padding: 7px 10px; background-color: #4285f4; color: white; border: none; border-radius: 6px; cursor: pointer; width: 100%; box-sizing: border-box; font-size: 12px; } .close-status-btn:hover { background-color: #3367d6; }`;
         statusShadowRoot.appendChild(style);
         const translationStatus = document.createElement('div');
         translationStatus.className = 'status';
         const header = document.createElement('div');
         header.id = 'translationStatusHeader';
         header.innerHTML = `<span id="translationHeaderText">${st.translating}</span><button id="minimizeStatusBtn" title="Minimize">―</button>`;
+        const promptText = document.createElement('div');
+        promptText.id = 'translationPromptText';
         const progressBar = document.createElement('div');
         progressBar.className = 'progress-bar';
         progressBar.innerHTML = `<div class="progress-fill" id="translationProgressFill"></div>`;
@@ -1104,14 +1231,18 @@
         stats.className = 'stats';
         stats.id = 'translationStats';
         stats.textContent = ' ';
+        const actionArea = document.createElement('div');
+        actionArea.id = 'translationActionArea';
         const cancelButton = document.createElement('button');
         cancelButton.id = 'cancelTranslationBtn';
         cancelButton.textContent = st.cancelButton;
         cancelButton.addEventListener('click', () => handleCancelButtonClick(lang));
         translationStatus.appendChild(header);
+        translationStatus.appendChild(promptText);
         translationStatus.appendChild(progressBar);
         translationStatus.appendChild(progressText);
         translationStatus.appendChild(stats);
+        translationStatus.appendChild(actionArea);
         translationStatus.appendChild(cancelButton);
         statusShadowRoot.appendChild(translationStatus);
         document.body.appendChild(statusContainer);

@@ -147,6 +147,9 @@ function updateProviderButtonSelection() {
 function setTranslationControlsDisabled(disabled) {
     document.getElementById('translateBtn').disabled = disabled;
     document.getElementById('translateAllBtn').disabled = disabled;
+}
+
+function setExcludeButtonDisabled(disabled) {
     document.getElementById('excludeBtn').disabled = disabled;
 }
 
@@ -172,6 +175,7 @@ async function checkTranslationStatus() {
     if (!currentTabId) return;
     document.getElementById('statusText').textContent = currentLangTexts.connecting;
     setTranslationControlsDisabled(true);
+    setExcludeButtonDisabled(true);
     try {
         const response = await chrome.tabs.sendMessage(currentTabId, { action: "getTranslationStatus" });
         if (response) {
@@ -182,35 +186,51 @@ async function checkTranslationStatus() {
                 }
                 document.getElementById('statusText').textContent = currentLangTexts.translationInProgress;
                 setTranslationControlsDisabled(true);
+                setExcludeButtonDisabled(true);
             } else {
                 hideProgress();
                 document.getElementById('statusText').textContent = '';
                 setTranslationControlsDisabled(false);
+                setExcludeButtonDisabled(false);
             }
         } else {
             hideProgress();
             document.getElementById('statusText').textContent = currentLangTexts.noResponse;
-            setTranslationControlsDisabled(true);
+            setTranslationControlsDisabled(false);
+            setExcludeButtonDisabled(false);
         }
     } catch (error) {
         hideProgress();
         document.getElementById('statusText').textContent = currentLangTexts.noResponse;
-        setTranslationControlsDisabled(true);
+        setTranslationControlsDisabled(false);
+        setExcludeButtonDisabled(false);
     }
 }
 
 function showProgress(percent) {
-    document.getElementById('progressContainer').style.display = 'block';
+    const progressContainer = document.getElementById('progressContainer');
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+    }
     const clampedPercent = Math.max(0, Math.min(100, percent));
-    document.getElementById('progressFill').style.width = clampedPercent + '%';
-    document.getElementById('progressText').textContent = currentLangTexts.progressText + clampedPercent.toFixed(1) + '%';
+    const progressFill = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    if (progressFill) {
+        progressFill.style.width = clampedPercent + '%';
+    }
+    if (progressText) {
+        progressText.textContent = currentLangTexts.progressText + clampedPercent.toFixed(1) + '%';
+    }
     setTranslationControlsDisabled(true);
+    setExcludeButtonDisabled(true);
 }
 
 function updateStats(stats) {
     const statsElement = document.getElementById('statsText');
-    if (!stats || typeof stats.batches === 'undefined') {
-        statsElement.textContent = '';
+    if (!statsElement || !stats || typeof stats.batches === 'undefined') {
+        if (statsElement) {
+            statsElement.textContent = '';
+        }
         return;
     }
     const pattern = currentLangTexts.batchStats;
@@ -223,10 +243,22 @@ function updateStats(stats) {
 }
 
 function hideProgress() {
-    document.getElementById('progressContainer').style.display = 'none';
-    document.getElementById('progressText').textContent = '';
-    document.getElementById('statsText').textContent = '';
-    document.getElementById('progressFill').style.width = '0%';
+    const progressContainer = document.getElementById('progressContainer');
+    const progressText = document.getElementById('progressText');
+    const statsText = document.getElementById('statsText');
+    const progressFill = document.getElementById('progressFill');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+    if (progressText) {
+        progressText.textContent = '';
+    }
+    if (statsText) {
+        statsText.textContent = '';
+    }
+    if (progressFill) {
+        progressFill.style.width = '0%';
+    }
 }
 
 async function translatePage(mode = 'visible') {
@@ -236,12 +268,14 @@ async function translatePage(mode = 'visible') {
     }
     document.getElementById('statusText').textContent = currentLangTexts.connecting;
     setTranslationControlsDisabled(true);
+    setExcludeButtonDisabled(true);
     try {
         const response = await chrome.tabs.sendMessage(currentTabId, { action: "startTranslationFromPopup", mode });
         if (!response) {
             document.getElementById('statusText').textContent = currentLangTexts.noResponse;
             hideProgress();
             setTranslationControlsDisabled(false);
+            setExcludeButtonDisabled(false);
             return;
         }
         if (response.status === "starting") {
@@ -254,11 +288,13 @@ async function translatePage(mode = 'visible') {
             document.getElementById('statusText').textContent = `${currentLangTexts.translationError}: Unexpected response (${response.status})`;
             hideProgress();
             setTranslationControlsDisabled(false);
+            setExcludeButtonDisabled(false);
         }
     } catch (e) {
         document.getElementById('statusText').textContent = `${currentLangTexts.connectionError}`;
         hideProgress();
         setTranslationControlsDisabled(false);
+        setExcludeButtonDisabled(false);
     }
 }
 
@@ -317,6 +353,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             hideProgress();
             document.getElementById('statusText').textContent = request.message || currentLangTexts.translationComplete;
             setTranslationControlsDisabled(false);
+            setExcludeButtonDisabled(false);
             break;
         case "translationError":
             hideProgress();
@@ -329,11 +366,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                 document.getElementById('statusText').textContent = errorMessage;
             }
             setTranslationControlsDisabled(false);
+            setExcludeButtonDisabled(false);
             break;
         case "translationCancelled":
             hideProgress();
             document.getElementById('statusText').textContent = currentLangTexts.translationCancelled;
             setTranslationControlsDisabled(false);
+            setExcludeButtonDisabled(false);
             break;
     }
     return true;
