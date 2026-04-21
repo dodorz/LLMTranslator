@@ -21,6 +21,34 @@
       margin-bottom: 15px;
     }
 
+    .provider-group {
+      margin-bottom: 12px;
+    }
+
+    .provider-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: bold;
+      margin-bottom: 6px;
+      color: #333;
+    }
+
+    .provider-group select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #d0d0d0;
+      border-radius: 4px;
+      box-sizing: border-box;
+      background-color: white;
+      color: #222;
+    }
+
+    .help-text {
+      font-size: 12px;
+      margin-top: 6px;
+      color: #666;
+    }
+
     .progress-container {
       margin: 15px 0;
       display: none;
@@ -86,6 +114,12 @@
   <div class="header">LLM Translator</div>
 
   <div class="info">Click the "Translate" button to translate the page.</div>
+
+  <div class="provider-group">
+    <label id="providerLabel" for="providerSelect">LLM Provider</label>
+    <select id="providerSelect"></select>
+    <div class="help-text" id="providerHelp">Choose the provider used for translation.</div>
+  </div>
 
   <div class="progress-container" id="progressContainer">
     <div class="progress-bar">
