@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "এলএলএম ওয়েবসাইট অনুবাদক",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "বিভিন্ন এলএলএম এপিআই ব্যবহার করে ওয়েবসাইটগুলিকে ইন-প্লেস অনুবাদ করার জন্য ক্রোম এক্সটেনশন।",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

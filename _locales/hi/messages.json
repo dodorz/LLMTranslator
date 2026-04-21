@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "एलएलएम वेबसाइट अनुवादक",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "विभिन्न एलएलएम एपीआई का उपयोग करके वेबसाइटों का इन-प्लेस अनुवाद करने के लिए क्रोम एक्सटेंशन।",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

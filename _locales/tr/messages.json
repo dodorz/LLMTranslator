@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "LLM Web Sitesi Çevirmeni",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "Çeşitli LLM API'lerini kullanarak web sitelerini yerinde çeviren Chrome uzantısı.",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

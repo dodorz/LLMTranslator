@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "Penerjemah Situs Web LLM",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "Ekstensi Chrome untuk menerjemahkan situs web di tempat menggunakan berbagai API LLM.",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

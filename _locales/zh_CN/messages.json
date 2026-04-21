@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "LLM 网站翻译器",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "使用各种 LLM API 原地翻译网站的 Chrome 扩展程序。",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

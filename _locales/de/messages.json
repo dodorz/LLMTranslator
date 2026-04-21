@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "LLM Website-Übersetzer",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "Chrome-Erweiterung zur Übersetzung von Websites vor Ort mit verschiedenen LLM-APIs.",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

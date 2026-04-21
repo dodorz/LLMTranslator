@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "Tradutor de Sites LLM",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "Extensão do Chrome para traduzir sites no local usando várias APIs LLM.",
+    "description": "The description of the application (max 132 chars)"
+  }
+}

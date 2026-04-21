@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title id="pageTitle">LLM Website Translator Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1 id="header">LLM Website Translator Settings</h1>
+
+    <div class="form-group">
+      <label id="apiProviderLabel" for="apiProvider">API Provider:</label>
+      <select id="apiProvider">
+        <option value="gemini" selected>Gemini</option>
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="anthropic">Anthropic</option>
+        <option value="xai">xAI</option>
+        <option value="ollama">Ollama(experimental)</option>
+        <option value="lmstudio">LM Studio(experimental)</option>
+      </select>
+      <p class="help-text" id="apiProviderHelp">Choose the API provider to use for translation.</p>
+    </div>
+    <div class="form-group" id="apiKeyGroup">
+      <label id="apiKeyLabel" for="apiKey">API Key:</label>
+      <input type="password" id="geminiApiKey" placeholder="Enter your Gemini API key" style="display: block;">
+      <input type="password" id="openaiApiKey" placeholder="Enter your OpenAI API key" style="display: none;">
+      <input type="password" id="deepseekApiKey" placeholder="Enter your DeepSeek API key" style="display: none;">
+      <input type="password" id="anthropicApiKey" placeholder="Enter your Anthropic API key" style="display: none;">
+      <input type="password" id="xaiApiKey" placeholder="Enter your xAI API key" style="display: none;">
+      <input type="password" id="ollamaApiKey" placeholder="Enter your Ollama API key (optional)" style="display: none;">
+      <input type="password" id="lmstudioApiKey" placeholder="Enter your LM Studio API key (optional)" style="display: none;">
+      <p class="help-text" id="apiKeyHelp"></p>
+    </div>
+    <div class="form-group" id="apiEndpointGroup" style="display: none;">
+       <label id="apiEndpointLabel" for="apiEndpoint">API Endpoint URL:</label>
+       <input type="text" id="ollamaApiEndpoint" placeholder="e.g., http://localhost:11434" style="display: none;">
+       <input type="text" id="lmstudioApiEndpoint" placeholder="e.g., http://localhost:1234" style="display: none;">
+       <p class="help-text" id="apiEndpointHelp"></p>
+    </div>
+    <div class="form-group" id="aiModelGroup">
+      <label id="aiModelLabel" for="aiModel">AI Model:</label>
+      <input type="text" id="aiModel" placeholder="e.g., gemini-2.0-flash-lite">
+      <p class="help-text" id="aiModelHelp"></p>
+    </div>
+    <div class="form-group">
+      <label for="targetLanguage">Language:</label>
+      <select id="targetLanguage">
+        <option value="en" selected>English</option>
+        <option value="ja">日本語</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="es">Español</option>
+        <option value="it">Italiano</option>
+        <option value="pt">Português</option>
+        <option value="ru">Русский</option>
+        <option value="zh-CN">简体中文</option>
+        <option value="zh-TW">繁體中文</option>
+        <option value="ko">한국어</option>
+        <option value="hi">हिन्दी</option>
+        <option value="ar">العربية</option>
+        <option value="bn">বাংলা</option>
+        <option value="id">Bahasa Indonesia</option>
+        <option value="tr">Türkçe</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label id="batchSizeLabel" for="batchSize">Batch Size (Number of Texts):</label>
+      <input type="number" id="batchSize" min="1" max="1000" placeholder="">
+      <p class="help-text" id="batchSizeHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="maxBatchLengthLabel" for="maxBatchLength">Max Batch Length (Characters):</label>
+      <input type="number" id="maxBatchLength" min="1000" max="100000" placeholder="">
+      <p class="help-text" id="maxBatchLengthHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="delayBetweenRequestsLabel" for="delayBetweenRequests">Delay Between Requests (ms):</label>
+      <input type="number" id="delayBetweenRequests" min="10" max="99999999" placeholder="">
+      <p class="help-text" id="delayBetweenRequestsHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="maxTokenLabel" for="maxToken">Max Output Tokens:</label>
+      <input type="number" id="maxToken" min="-1" max="9999999" placeholder="">
+      <p class="help-text" id="maxTokenHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="concurrencyLimitLabel" for="concurrencyLimit">Concurrency Limit:</label>
+      <input type="number" id="concurrencyLimit" min="1" max="50" placeholder="">
+      <p class="help-text" id="concurrencyLimitHelp"></p>
+    </div>
+    <div class="form-group">
+        <label id="maxRetriesLabel" for="maxRetries">Max Retries on Error:</label>
+        <input type="number" id="maxRetries" min="0" max="10" placeholder="">
+        <p class="help-text" id="maxRetriesHelp"></p>
+    </div>
+    <div class="form-group">
+        <label id="timeoutLabel" for="timeout">API Request Timeout (seconds):</label>
+        <input type="number" id="timeout" min="1" max="600" placeholder="">
+        <p class="help-text" id="timeoutHelp"></p>
+    </div>
+
+    <div class="form-group" id="ollamaUnloadGroup">
+      <label id="ollamaUnloadLabel" for="ollamaUnloadAfterTranslation">Unload Ollama Model After Request:</label>
+      <input type="checkbox" id="ollamaUnloadAfterTranslation">
+      <p class="help-text" id="ollamaUnloadHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="toggleBlueBackgroundLabel" for="toggleBlueBackground">Translated Text Blue Background:</label>
+      <input type="checkbox" id="toggleBlueBackground">
+      <p class="help-text" id="toggleBlueBackgroundHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="autoTranslationLabel" for="realTimeTranslation">Automatic Translation:</label>
+      <input type="checkbox" id="realTimeTranslation">
+      <p class="help-text" id="autoTranslationHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="showProgressPopupLabel" for="showProgressPopup">Show Progress Popup:</label>
+      <input type="checkbox" id="showProgressPopup">
+      <p class="help-text" id="showProgressPopupHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="hidePromptAllSitesLabel" for="hidePromptAllSites">Hide Translation Prompt for All Sites:</label>
+      <input type="checkbox" id="hidePromptAllSites">
+      <p class="help-text" id="hidePromptAllSitesHelp"></p>
+    </div>
+    <div class="form-group">
+      <label id="excludeListLabel" for="excludeList">List of Sites to Exclude:</label>
+      <textarea id="excludeList" rows="5" placeholder="https://example.com
+https://www.example.org"></textarea>
+      <p class="help-text" id="excludeListHelp"></p>
+    </div>
+
+    <button id="saveBtn">Save Settings</button>
+    <div id="status"></div>
+  </div>
+  <div style="text-align: center; margin-top: 20px;">
+    <a href="https://forms.gle/hcNDcg1E2D9TWGPV9" target="_blank" id="supportLink">お問い合わせ</a>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

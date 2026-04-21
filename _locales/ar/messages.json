@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "مترجم مواقع الويب LLM",
+    "description": "The name of the application"
+  },
+  "appDescription": {
+    "message": "امتداد Chrome لترجمة مواقع الويب في مكانها باستخدام واجهات برمجة تطبيقات LLM متنوعة.",
+    "description": "The description of the application (max 132 chars)"
+  }
+}
