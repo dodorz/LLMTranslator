@@ -70,7 +70,6 @@ async function initPopupUI() {
         } else {
             document.getElementById('statusText').textContent = currentLangTexts.connectionError;
             setTranslationControlsDisabled(true);
-            document.getElementById('providerSelect').disabled = true;
         }
     } catch (error) {
         console.error("Error initializing popup:", error);
@@ -138,7 +137,6 @@ function setTranslationControlsDisabled(disabled) {
     document.getElementById('translateBtn').disabled = disabled;
     document.getElementById('translateAllBtn').disabled = disabled;
     document.getElementById('excludeBtn').disabled = disabled;
-    document.getElementById('providerSelect').disabled = disabled;
 }
 
 async function handleProviderChange() {
