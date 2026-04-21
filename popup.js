@@ -19,6 +19,7 @@ const uiTranslations = {
 let currentLangTexts = uiTranslations.en;
 let currentTabId = null;
 let providerEntries = [];
+let activeProviderId = '';
 const translateAllButtonTexts = {
     en: 'Translate All',
     ja: '全文翻訳',
@@ -100,37 +101,47 @@ function normalizeProviderEntries(providerConfigs, apiProvider) {
 
 function renderProviderSelect(providerConfigs, apiProvider) {
     providerEntries = normalizeProviderEntries(providerConfigs, apiProvider);
-    const select = document.getElementById('providerSelect');
-    select.innerHTML = '';
+    const container = document.getElementById('providerButtons');
+    container.innerHTML = '';
 
     if (providerEntries.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No provider available';
-        option.disabled = true;
-        option.selected = true;
-        select.appendChild(option);
-        select.disabled = true;
+        const emptyState = document.createElement('button');
+        emptyState.type = 'button';
+        emptyState.className = 'provider-chip';
+        emptyState.textContent = 'No provider available';
+        emptyState.disabled = true;
+        container.appendChild(emptyState);
+        activeProviderId = '';
         return;
     }
-
-    providerEntries.forEach(entry => {
-        const option = document.createElement('option');
-        option.value = entry.id;
-        option.textContent = entry.name;
-        select.appendChild(option);
-    });
 
     const matchedId = providerEntries.some(entry => entry.id === apiProvider)
         ? apiProvider
         : providerEntries[0].id;
-    select.value = matchedId;
-    select.dataset.lastValue = matchedId;
-    select.disabled = false;
-    select.onchange = handleProviderChange;
+    activeProviderId = matchedId;
+
+    providerEntries.forEach(entry => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `provider-chip${entry.id === matchedId ? ' active' : ''}`;
+        button.textContent = entry.name;
+        button.dataset.providerId = entry.id;
+        button.setAttribute('aria-pressed', entry.id === matchedId ? 'true' : 'false');
+        button.addEventListener('click', () => handleProviderChange(entry.id));
+        container.appendChild(button);
+    });
+
     if (matchedId !== apiProvider) {
         chrome.storage.local.set({ apiProvider: matchedId }).catch(() => {});
     }
+}
+
+function updateProviderButtonSelection() {
+    document.querySelectorAll('#providerButtons .provider-chip').forEach(button => {
+        const isActive = button.dataset.providerId === activeProviderId;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
 }
 
 function setTranslationControlsDisabled(disabled) {
@@ -139,17 +150,20 @@ function setTranslationControlsDisabled(disabled) {
     document.getElementById('excludeBtn').disabled = disabled;
 }
 
-async function handleProviderChange() {
-    const select = document.getElementById('providerSelect');
-    const nextProviderId = select.value;
-    const previousProviderId = select.dataset.lastValue || nextProviderId;
+async function handleProviderChange(nextProviderId) {
+    const previousProviderId = activeProviderId || nextProviderId;
+    if (!nextProviderId || nextProviderId === previousProviderId) {
+        return;
+    }
+    activeProviderId = nextProviderId;
+    updateProviderButtonSelection();
     try {
         await chrome.storage.local.set({ apiProvider: nextProviderId });
-        select.dataset.lastValue = nextProviderId;
         document.getElementById('statusText').textContent = '';
     } catch (error) {
         console.error('Error saving active provider:', error);
-        select.value = previousProviderId;
+        activeProviderId = previousProviderId;
+        updateProviderButtonSelection();
         document.getElementById('statusText').textContent = currentLangTexts.connectionError;
     }
 }

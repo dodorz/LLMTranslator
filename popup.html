@@ -37,14 +37,40 @@
       color: #333;
     }
 
-    .provider-group select {
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #d0d0d0;
-      border-radius: 4px;
-      box-sizing: border-box;
-      background-color: white;
-      color: #222;
+    .provider-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .provider-chip {
+      width: auto;
+      margin-top: 0;
+      padding: 6px 10px;
+      border: 1px solid #cfd6e4;
+      border-radius: 999px;
+      background: white;
+      color: #2b3a55;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .provider-chip:hover {
+      background: #eef4ff;
+      border-color: #8aa8e8;
+    }
+
+    .provider-chip.active {
+      background: #2f6feb;
+      border-color: #2f6feb;
+      color: white;
+    }
+
+    .provider-chip:disabled {
+      border-color: #d8d8d8;
+      background: #efefef;
+      color: #888;
     }
 
     .help-text {
@@ -120,8 +146,8 @@
   <div class="info">Click the "Translate" button to translate the page.</div>
 
   <div class="provider-group">
-    <label id="providerLabel" for="providerSelect">LLM Provider</label>
-    <select id="providerSelect"></select>
+    <label id="providerLabel">LLM Provider</label>
+    <div id="providerButtons" class="provider-buttons"></div>
     <div class="help-text" id="providerHelp">Choose the provider used for translation.</div>
   </div>
 
