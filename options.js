@@ -90,6 +90,7 @@ async function initOptionsPage() {
             'realTimeTranslation',
             'showProgressPopup',
             'excludeList',
+            'whitelist',
             'hidePromptAllSites'
         ]);
 
@@ -307,6 +308,11 @@ function bindProviderControls() {
     });
 
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
+    document.getElementById('exportConfigBtn').addEventListener('click', exportSettings);
+    document.getElementById('importConfigBtn').addEventListener('click', () => {
+        document.getElementById('importConfigInput').click();
+    });
+    document.getElementById('importConfigInput').addEventListener('change', importSettings);
 }
 
 chrome.runtime.onMessage.addListener((request) => {
@@ -335,6 +341,7 @@ function fillSettings(items) {
     document.getElementById('showProgressPopup').checked = items.showProgressPopup !== false;
     document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites === true;
     document.getElementById('excludeList').value = Array.isArray(items.excludeList) ? items.excludeList.join('\n') : '';
+    document.getElementById('whitelist').value = Array.isArray(items.whitelist) ? items.whitelist.join('\n') : '';
 }
 
 function renderSelectedProvider() {
@@ -547,6 +554,17 @@ function generateUniqueProviderId(baseId) {
 }
 
 async function saveSettings() {
+    const saveData = buildSettingsPayloadFromForm();
+    try {
+        await chrome.storage.local.set(saveData);
+        showStatus('Settings saved!', 'success');
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        showStatus('Error saving settings.', 'error');
+    }
+}
+
+function buildSettingsPayloadFromForm() {
     saveSelectedProviderFromForm();
     const provider = getProviderConfig(selectedProviderId);
 
@@ -563,6 +581,7 @@ async function saveSettings() {
     const showProgressPopup = document.getElementById('showProgressPopup').checked;
     const hidePromptAllSites = document.getElementById('hidePromptAllSites').checked;
     const excludeList = document.getElementById('excludeList').value.split(/\r?\n/).map(url => url.trim()).filter(Boolean);
+    const whitelist = document.getElementById('whitelist').value.split(/\r?\n/).map(url => url.trim()).filter(Boolean);
 
     const saveData = {
         targetLanguage,
@@ -582,20 +601,133 @@ async function saveSettings() {
         realTimeTranslation,
         showProgressPopup,
         hidePromptAllSites,
-        excludeList
+        excludeList,
+        whitelist
     };
 
     if (provider) {
         Object.assign(saveData, buildLegacyStorageSnapshot(provider));
     }
 
+    return saveData;
+}
+
+async function exportSettings() {
     try {
-        await chrome.storage.local.set(saveData);
-        showStatus('Settings saved!', 'success');
+        const payload = buildSettingsPayloadFromForm();
+        const exportData = {
+            format: 'llm-translator-config',
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            storage: payload
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const datePart = new Date().toISOString().slice(0, 10);
+        link.href = url;
+        link.download = `llm-translator-config-${datePart}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showStatus('Configuration exported.', 'success');
     } catch (error) {
-        console.error('Error saving settings:', error);
-        showStatus('Error saving settings.', 'error');
+        console.error('Error exporting settings:', error);
+        showStatus('Error exporting configuration.', 'error');
     }
+}
+
+async function importSettings(event) {
+    const input = event.target;
+    const file = input.files?.[0];
+    input.value = '';
+
+    if (!file) {
+        return;
+    }
+
+    try {
+        const text = await file.text();
+        const imported = JSON.parse(text);
+        const normalized = normalizeImportedSettings(imported);
+        await chrome.storage.local.set(normalized);
+
+        currentLang = normalized.targetLanguage || 'en';
+        providerConfigs = normalizeProviderConfigs(normalized);
+        selectedProviderId = (normalized.apiProvider && providerConfigs.some(config => config.id === normalized.apiProvider))
+            ? normalized.apiProvider
+            : (providerConfigs[0]?.id || '');
+
+        renderProviderSelect();
+        fillSettings(normalized);
+        renderSelectedProvider();
+        updateUiText();
+        setProviderTestLog('', '');
+        showStatus('Configuration imported.', 'success', 5000);
+    } catch (error) {
+        console.error('Error importing settings:', error);
+        showStatus(error.message || 'Error importing configuration.', 'error', 5000);
+    }
+}
+
+function normalizeImportedSettings(imported) {
+    const raw = (imported && typeof imported === 'object' && imported.storage && typeof imported.storage === 'object')
+        ? imported.storage
+        : imported;
+
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('Invalid configuration file.');
+    }
+
+    const normalizedProviders = normalizeProviderConfigs(raw);
+    const nextSelectedProviderId = (raw.apiProvider && normalizedProviders.some(config => config.id === raw.apiProvider))
+        ? raw.apiProvider
+        : (normalizedProviders[0]?.id || '');
+    const nextSelectedProvider = normalizedProviders.find(config => config.id === nextSelectedProviderId) || normalizedProviders[0] || null;
+
+    const normalized = {
+        targetLanguage: typeof raw.targetLanguage === 'string' ? raw.targetLanguage : 'en',
+        apiProvider: nextSelectedProviderId,
+        providerConfigs: normalizedProviders.map(config => ({
+            ...config,
+            models: Array.isArray(config.models) ? config.models : parseModels(config.models)
+        })),
+        batchSize: normalizeNumber(raw.batchSize, 80, 1, 1000),
+        maxBatchLength: normalizeNumber(raw.maxBatchLength, 5000, 1000, 100000),
+        delayBetweenRequests: normalizeNumber(raw.delayBetweenRequests, 2500, 10, 99999999),
+        maxToken: normalizeNumber(raw.maxToken, 8192, -1, 9999999),
+        concurrencyLimit: normalizeNumber(raw.concurrencyLimit, 10, 1, 50),
+        maxRetries: normalizeNumber(raw.maxRetries, 3, 0, 10),
+        timeout: normalizeNumber(raw.timeout, 300, 1, 600),
+        toggleBlueBackground: raw.toggleBlueBackground === true,
+        realTimeTranslation: raw.realTimeTranslation === true,
+        showProgressPopup: raw.showProgressPopup !== false,
+        hidePromptAllSites: raw.hidePromptAllSites === true,
+        excludeList: Array.isArray(raw.excludeList)
+            ? raw.excludeList.map(item => String(item || '').trim()).filter(Boolean)
+            : [],
+        whitelist: Array.isArray(raw.whitelist)
+            ? raw.whitelist.map(item => String(item || '').trim()).filter(Boolean)
+            : []
+    };
+
+    if (nextSelectedProvider) {
+        Object.assign(normalized, buildLegacyStorageSnapshot(nextSelectedProvider));
+    }
+
+    return normalized;
+}
+
+function normalizeNumber(value, fallback, min, max) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return fallback;
+    }
+    if (parsed < min || parsed > max) {
+        return fallback;
+    }
+    return parsed;
 }
 
 function buildLegacyStorageSnapshot(provider) {
@@ -658,6 +790,9 @@ function updateUiText() {
     document.getElementById('addProviderBtn').textContent = 'Add Provider';
     document.getElementById('duplicateProviderBtn').textContent = 'Duplicate Provider';
     document.getElementById('removeProviderBtn').textContent = 'Remove Provider';
+    document.getElementById('exportConfigBtn').textContent = 'Export Config';
+    document.getElementById('importConfigBtn').textContent = 'Import Config';
+    document.getElementById('configTransferHelp').textContent = 'Export your current local settings as a JSON backup, or import a previously exported configuration file.';
     document.getElementById('batchSizeLabel').textContent = 'Batch Size (Number of Texts):';
     document.getElementById('batchSizeHelp').textContent = 'Max number of text pieces per API request. Larger values can be faster but may cause errors.';
     document.getElementById('maxBatchLengthLabel').textContent = 'Max Batch Length (Characters):';
@@ -681,7 +816,9 @@ function updateUiText() {
     document.getElementById('hidePromptAllSitesLabel').textContent = 'Hide Translation Prompt for All Sites:';
     document.getElementById('hidePromptAllSitesHelp').textContent = 'If enabled, the translation prompt will not appear on any site.';
     document.getElementById('excludeListLabel').textContent = 'List of Sites to Exclude:';
-    document.getElementById('excludeListHelp').textContent = 'Enter each URL on a new line. Sites listed here will not be translated automatically.';
+    document.getElementById('excludeListHelp').textContent = 'Enter each URL or wildcard pattern on a new line, for example https://example.com, *.example.com, or man*.org. Matching sites will not be translated automatically.';
+    document.getElementById('whitelistLabel').textContent = 'Whitelist Sites for Auto Translation:';
+    document.getElementById('whitelistHelp').textContent = 'Enter each URL or wildcard pattern on a new line, for example https://example.com, *.example.com, or man*.org. Matching sites will auto-translate with the current provider and skip the provider chooser.';
     document.getElementById('saveBtn').textContent = 'Save Settings';
     document.getElementById('supportLink').textContent = 'Support';
     document.title = 'LLM Website Translator Settings';

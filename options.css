@@ -58,6 +58,10 @@ textarea {
   min-width: 140px;
 }
 
+#importConfigInput {
+  display: none;
+}
+
 .help-text {
   font-size: 12px;
   color: #666;

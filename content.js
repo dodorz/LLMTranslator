@@ -114,7 +114,7 @@
 
     function initTranslation() {
         try {
-            chrome.storage.local.get(['targetLanguage', 'realTimeTranslation', 'excludeList', 'apiProvider', 'hidePromptAllSites'], function(items) {
+            chrome.storage.local.get(['targetLanguage', 'realTimeTranslation', 'excludeList', 'whitelist', 'apiProvider', 'hidePromptAllSites'], function(items) {
                 // Initial setup happens as soon as possible.
                 try {
                     initializeTextNodeMap();
@@ -136,7 +136,7 @@
                     const currentUrl = window.location.href;
                     const excludeList = items.excludeList || [];
                     const siteOrigin = new URL(currentUrl).origin;
-                    if (excludeList.some(prefix => currentUrl.startsWith(prefix) || siteOrigin === prefix)) {
+                    if (matchesSiteList(excludeList, currentUrl, siteOrigin)) {
                         return;
                     }
                     translationStarted = true;
@@ -144,6 +144,20 @@
                     setTimeout(translationStarter, 100); // Initial scan for static content
                     setTimeout(translationStarter, 1500); // Delayed scan for JS-rendered content
                 } else {
+                    const currentUrl = window.location.href;
+                    const siteOrigin = new URL(currentUrl).origin;
+                    const excludeList = items.excludeList || [];
+                    const whitelist = items.whitelist || [];
+
+                    if (matchesSiteList(excludeList, currentUrl, siteOrigin)) {
+                        return;
+                    }
+                    if (matchesSiteList(whitelist, currentUrl, siteOrigin)) {
+                        translationStarted = true;
+                        setTimeout(translationStarter, 100);
+                        setTimeout(translationStarter, 1500);
+                        return;
+                    }
                     if (!pageLangPrimary || pageLangPrimary !== chosenLangPrimary) {
                         if (items.hidePromptAllSites !== true) {
                             createTranslationPrompt(chosenLang);
@@ -152,6 +166,28 @@
                 }
             });
         } catch (error) {}
+    }
+
+    function matchesSiteList(siteList, currentUrl, siteOrigin) {
+        if (!Array.isArray(siteList) || siteList.length === 0) {
+            return false;
+        }
+        return siteList.some(pattern => {
+            const normalized = String(pattern || '').trim();
+            if (!normalized) {
+                return false;
+            }
+            if (!normalized.includes('*')) {
+                return currentUrl.startsWith(normalized) || siteOrigin === normalized;
+            }
+            const wildcardRegex = buildWildcardRegex(normalized);
+            return wildcardRegex.test(currentUrl) || wildcardRegex.test(siteOrigin);
+        });
+    }
+
+    function buildWildcardRegex(pattern) {
+        const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`^${escaped.replace(/\*/g, '.*')}$`, 'i');
     }
 
     function getPageLanguage() {
