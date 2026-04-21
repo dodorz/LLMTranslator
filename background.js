@@ -41,6 +41,195 @@ let isProcessing = false;
 let activeTranslationTabs = new Set();
 let unloadTimerId = null;
 
+const BUILTIN_PROVIDER_TEMPLATES = {
+    gemini: {
+        name: 'Gemini',
+        type: 'gemini',
+        defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        defaultModels: ['gemini-flash-lite-latest'],
+        apiKeyRequired: true
+    },
+    openai: {
+        name: 'OpenAI',
+        type: 'openai',
+        defaultEndpoint: 'https://api.openai.com/v1',
+        defaultModels: ['gpt-5-nano'],
+        apiKeyRequired: true
+    },
+    deepseek: {
+        name: 'DeepSeek',
+        type: 'deepseek',
+        defaultEndpoint: 'https://api.deepseek.com/v1',
+        defaultModels: ['deepseek-chat'],
+        apiKeyRequired: true
+    },
+    anthropic: {
+        name: 'Anthropic',
+        type: 'anthropic',
+        defaultEndpoint: 'https://api.anthropic.com/v1',
+        defaultModels: ['claude-sonnet-4-5-20250929'],
+        apiKeyRequired: true
+    },
+    xai: {
+        name: 'xAI',
+        type: 'xai',
+        defaultEndpoint: 'https://api.x.ai/v1',
+        defaultModels: ['grok-4-fast-non-reasoning'],
+        apiKeyRequired: true
+    },
+    ollama: {
+        name: 'Ollama',
+        type: 'ollama',
+        defaultEndpoint: 'http://localhost:11434',
+        defaultModels: ['llama3'],
+        apiKeyRequired: false
+    },
+    lmstudio: {
+        name: 'LM Studio',
+        type: 'lmstudio',
+        defaultEndpoint: 'http://localhost:1234',
+        defaultModels: [''],
+        apiKeyRequired: false
+    }
+};
+
+function parseModels(input) {
+    if (Array.isArray(input)) {
+        return input.map(value => String(value || '').trim()).filter(Boolean);
+    }
+    return String(input || '')
+        .split(/[\n,]/)
+        .map(value => value.trim())
+        .filter(Boolean);
+}
+
+function normalizeProviderType(type) {
+    return BUILTIN_PROVIDER_TEMPLATES[type] ? type : 'openai';
+}
+
+function sanitizeProviderId(value) {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return normalized || 'provider';
+}
+
+function normalizeProviderConfig(config, index = 0) {
+    const template = BUILTIN_PROVIDER_TEMPLATES[config?.type] || BUILTIN_PROVIDER_TEMPLATES[config?.id] || BUILTIN_PROVIDER_TEMPLATES.openai;
+    const id = sanitizeProviderId(config?.id || config?.name || `${template.type}-${index}`);
+    return {
+        id,
+        name: String(config?.name || template.name || id).trim(),
+        type: normalizeProviderType(config?.type || template.type),
+        apiKey: String(config?.apiKey || '').trim(),
+        endpoint: String(config?.endpoint || template.defaultEndpoint || '').trim(),
+        models: parseModels(Array.isArray(config?.models) ? config.models.join('\n') : (config?.models || config?.model || template.defaultModels.join('\n'))),
+        unloadAfterTranslation: config?.unloadAfterTranslation === true
+    };
+}
+
+async function getProviderConfigsFromStorage() {
+    const items = await new Promise(resolve => chrome.storage.local.get([
+        'providerConfigs',
+        'apiProvider',
+        'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'anthropicApiKey', 'xaiApiKey', 'ollamaApiKey', 'lmstudioApiKey',
+        'geminiApiEndpoint', 'openaiApiEndpoint', 'deepseekApiEndpoint', 'anthropicApiEndpoint', 'xaiApiEndpoint', 'ollamaApiEndpoint', 'lmstudioApiEndpoint',
+        'geminiModel', 'openaiModel', 'deepseekModel', 'anthropicModel', 'xaiModel', 'ollamaModel', 'lmstudioModel',
+        'ollamaUnloadAfterTranslation'
+    ], resolve));
+
+    if (Array.isArray(items.providerConfigs)) {
+        return items.providerConfigs.map((config, index) => normalizeProviderConfig(config, index));
+    }
+
+    return Object.keys(BUILTIN_PROVIDER_TEMPLATES).map((id, index) => {
+        const template = BUILTIN_PROVIDER_TEMPLATES[id];
+        return normalizeProviderConfig({
+            id,
+            name: template.name,
+            type: template.type,
+            apiKey: items[`${id}ApiKey`] || '',
+            endpoint: items[`${id}ApiEndpoint`] || template.defaultEndpoint,
+            models: items[`${id}Model`] || template.defaultModels.join('\n'),
+            unloadAfterTranslation: items.ollamaUnloadAfterTranslation === true && id === 'ollama'
+        }, index);
+    });
+}
+
+async function resolveProviderConfig(providerId) {
+    const providerConfigs = await getProviderConfigsFromStorage();
+    const normalizedId = sanitizeProviderId(providerId);
+    const config = providerConfigs.find(item => item.id === normalizedId);
+    if (config) {
+        return config;
+    }
+    return null;
+}
+
+function getProviderDisplayName(provider) {
+    if (!provider) {
+        return 'Provider';
+    }
+    return provider.name || BUILTIN_PROVIDER_TEMPLATES[provider.type]?.name || provider.type || 'Provider';
+}
+
+function getTranslateFunction(providerType) {
+    switch (providerType) {
+        case 'gemini':
+            return translateWithGemini;
+        case 'openai':
+            return translateWithOpenAI;
+        case 'deepseek':
+            return translateWithDeepSeek;
+        case 'anthropic':
+            return translateWithAnthropic;
+        case 'xai':
+            return translateWithXAI;
+        case 'ollama':
+            return translateWithOllama;
+        case 'lmstudio':
+            return translateWithLMStudio;
+        default:
+            return null;
+    }
+}
+
+function getModelCandidates(provider, fallbackModel) {
+    const models = parseModels(provider?.models);
+    if (models.length > 0) {
+        return models;
+    }
+    if (fallbackModel) {
+        return [fallbackModel];
+    }
+    const template = BUILTIN_PROVIDER_TEMPLATES[provider?.type] || BUILTIN_PROVIDER_TEMPLATES.openai;
+    return template.defaultModels.filter(Boolean);
+}
+
+function isModelMissingError(error, serviceName) {
+    const message = String(error?.message || '').toLowerCase();
+    if (!message) {
+        return false;
+    }
+    return message.includes('model_not_found') ||
+        message.includes('model not found') ||
+        message.includes('no such model') ||
+        message.includes('model is not found') ||
+        message.includes('404') && message.includes('model') ||
+        message.includes(getErrorMessage('modelNotFound', 'en').replace('{service}', serviceName).toLowerCase());
+}
+
+function resolveEndpoint(provider, fallbackEndpoint) {
+    const endpoint = String(provider?.endpoint || '').trim();
+    return endpoint || fallbackEndpoint;
+}
+
+function getModelApiKey(provider) {
+    return String(provider?.apiKey || '').trim();
+}
+
 function getTabState(tabId) {
     if (!tabStates.has(tabId)) {
         tabStates.set(tabId, {
@@ -81,8 +270,20 @@ chrome.runtime.onInstalled.addListener(function(details) {
         if (items.timeout === undefined) chrome.storage.local.set({ timeout: 300 });
         if (items.ollamaUnloadAfterTranslation === undefined) chrome.storage.local.set({ ollamaUnloadAfterTranslation: false });
     });
-    chrome.storage.local.get(['apiProvider', 'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'anthropicApiKey', 'xaiApiKey', 'ollamaApiKey', 'lmstudioApiKey', 'ollamaApiEndpoint', 'lmstudioApiEndpoint'], function(items) {
+    chrome.storage.local.get(['apiProvider', 'providerConfigs'], function(items) {
         if (!items.apiProvider) chrome.storage.local.set({ apiProvider: 'gemini' });
+        if (!Array.isArray(items.providerConfigs)) {
+            const providerConfigs = Object.keys(BUILTIN_PROVIDER_TEMPLATES).map((id) => ({
+                id,
+                name: BUILTIN_PROVIDER_TEMPLATES[id].name,
+                type: BUILTIN_PROVIDER_TEMPLATES[id].type,
+                apiKey: '',
+                endpoint: BUILTIN_PROVIDER_TEMPLATES[id].defaultEndpoint,
+                models: BUILTIN_PROVIDER_TEMPLATES[id].defaultModels,
+                unloadAfterTranslation: false
+            }));
+            chrome.storage.local.set({ providerConfigs });
+        }
     });
     chrome.storage.local.get(['geminiModel', 'openaiModel', 'deepseekModel', 'anthropicModel', 'xaiModel', 'ollamaModel', 'lmstudioModel'], function(items) {});
     chrome.storage.local.get(['targetLanguage'], function(items) {
@@ -97,6 +298,47 @@ chrome.runtime.onInstalled.addListener(function(details) {
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     const tabId = sender.tab?.id;
+    if (request.action === 'testProvider') {
+        (async () => {
+            try {
+                const provider = normalizeProviderConfig(request.provider || {}, 0);
+                const targetLanguage = request.targetLanguage || 'en';
+                const translateFunction = getTranslateFunction(provider.type);
+                if (!translateFunction) {
+                    throw new Error(getErrorMessage('unsupportedProvider', 'en'));
+                }
+                notifyProviderTestStatus(request.requestId, 'Preparing provider test...', 'info');
+                const providerLabel = getProviderDisplayName(provider);
+                const models = getModelCandidates(provider, provider.models?.[0] || '');
+                notifyProviderTestStatus(
+                    request.requestId,
+                    `Checking ${providerLabel} with ${models.length > 0 ? models[0] : 'default model'}...`,
+                    'info'
+                );
+                const translated = await translateFunction(
+                    'Hello',
+                    targetLanguage,
+                    0,
+                    null,
+                    'en',
+                    provider
+                );
+                notifyProviderTestStatus(request.requestId, 'Provider test completed.', 'info');
+                sendResponse({
+                    success: true,
+                    message: `Provider test succeeded. Sample response: ${String(translated || '').slice(0, 80)}`
+                });
+            } catch (error) {
+                notifyProviderTestStatus(request.requestId, error.message || 'Provider test failed.', 'error');
+                sendResponse({
+                    success: false,
+                    error: error.message || 'Provider test failed.'
+                });
+            }
+        })();
+        return true;
+    }
+
     if (!tabId) return false;
 
     if (request.action === "translateBatch") {
@@ -252,19 +494,20 @@ async function handlePotentialUnload() {
         unloadTimerId = null;
     }
     if (activeTranslationTabs.size > 0 || globalRequestQueue.size > 0 || isProcessing) return;
-    const items = await new Promise(resolve => chrome.storage.local.get(['apiProvider', 'ollamaUnloadAfterTranslation', 'ollamaApiEndpoint', 'ollamaApiKey', 'ollamaModel'], resolve));
-    if (items.apiProvider === 'ollama' && items.ollamaUnloadAfterTranslation && items.ollamaApiEndpoint && items.ollamaModel) {
+    const items = await new Promise(resolve => chrome.storage.local.get(['apiProvider', 'ollamaUnloadAfterTranslation'], resolve));
+    const provider = await resolveProviderConfig(items.apiProvider);
+    if (provider?.type === 'ollama' && (provider.unloadAfterTranslation || items.ollamaUnloadAfterTranslation)) {
         const unloadDelay = 5000;
         unloadTimerId = setTimeout(async () => {
             if (activeTranslationTabs.size > 0 || globalRequestQueue.size > 0 || isProcessing) {
                 unloadTimerId = null;
                 return;
             }
-            const endpointUrl = `${items.ollamaApiEndpoint.replace(/\/$/, '')}/api/chat`;
+            const endpointUrl = `${provider.endpoint.replace(/\/$/, '')}/api/chat`;
             const headers = { 'Content-Type': 'application/json' };
-            if (items.ollamaApiKey) headers['Authorization'] = `Bearer ${items.ollamaApiKey}`;
+            if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
             const requestBody = JSON.stringify({
-                model: items.ollamaModel,
+                model: provider.models?.[0] || '',
                 messages: [{ role: "user", content: "." }],
                 keep_alive: "0s",
                 stream: false
@@ -288,6 +531,18 @@ async function handlePotentialUnload() {
 
 function getErrorMessage(key, lang = 'en') {
     return (errorTranslations[lang] || errorTranslations.en)[key] || errorTranslations.en.unknownError;
+}
+
+function notifyProviderTestStatus(requestId, message, type = 'info') {
+    if (!requestId) {
+        return;
+    }
+    chrome.runtime.sendMessage({
+        action: 'testProviderStatus',
+        requestId,
+        message,
+        type
+    }).catch(() => {});
 }
 
 function createAbortError(lang = 'en') {
@@ -358,16 +613,13 @@ async function translateTextBatch(fragmentBatch, targetLanguage, apiProvider, si
     if (!fragmentBatch || fragmentBatch.length === 0) return [];
 
     const { maxRetries } = await new Promise(resolve => chrome.storage.local.get(['maxRetries'], resolve));
-    let translateFunction;
-    switch (apiProvider) {
-        case 'gemini': translateFunction = translateWithGemini; break;
-        case 'openai': translateFunction = translateWithOpenAI; break;
-        case 'deepseek': translateFunction = translateWithDeepSeek; break;
-        case 'anthropic': translateFunction = translateWithAnthropic; break;
-        case 'xai': translateFunction = translateWithXAI; break;
-        case 'ollama': translateFunction = translateWithOllama; break;
-        case 'lmstudio': translateFunction = translateWithLMStudio; break;
-        default: throw new Error(getErrorMessage('unsupportedProvider', lang));
+    const provider = await resolveProviderConfig(apiProvider);
+    if (!provider) {
+        throw new Error(getErrorMessage('unsupportedProvider', lang));
+    }
+    const translateFunction = getTranslateFunction(provider.type);
+    if (!translateFunction) {
+        throw new Error(getErrorMessage('unsupportedProvider', lang));
     }
 
     const markers = [];
@@ -378,7 +630,14 @@ async function translateTextBatch(fragmentBatch, targetLanguage, apiProvider, si
         markers.push({ id: frag.id, originalIndex: index });
     });
 
-    const translatedTextWithMarkers = await translateFunction(combinedText, targetLanguage, maxRetries !== undefined ? maxRetries : 3, signal, lang);
+    const translatedTextWithMarkers = await translateFunction(
+        combinedText,
+        targetLanguage,
+        maxRetries !== undefined ? maxRetries : 3,
+        signal,
+        lang,
+        provider
+    );
 
     const foundTranslations = new Map();
     const markerRegex = /\[\s*F_(\d+)\s*\]/g;
@@ -461,271 +720,387 @@ function createTranslationPrompt(text, targetLanguage) {
 ${text}`;
 }
 
-async function translateWithGemini(text, targetLanguage, retryLimit, signal, lang) {
-    const { geminiApiKey: apiKey, geminiModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['geminiApiKey', 'geminiModel', 'maxToken', 'timeout'], resolve));
-    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', 'Gemini'));
-    const actualModel = (model || '').trim() || 'gemini-flash-lite-latest';
-    const prompt = createTranslationPrompt(text, targetLanguage);
-    const requestBody = {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: maxToken || 8192 }
-    };
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${actualModel}:generateContent?key=${apiKey}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error?.message || `HTTP Error ${response.status}`;
-            switch (response.status) {
-                case 400:
-                    if (message.includes("API key not valid")) {
-                        throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', 'Gemini'));
+async function translateWithGemini(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', serviceName));
+
+    const endpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.gemini.defaultEndpoint);
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.gemini.defaultModels[0]);
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const prompt = createTranslationPrompt(text, targetLanguage);
+            const requestBody = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.2, maxOutputTokens: maxToken || 8192 }
+            };
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${endpoint.replace(/\/$/, '')}/${actualModel}:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error?.message || `HTTP Error ${response.status}`;
+                    switch (response.status) {
+                        case 400:
+                            if (message.includes('API key not valid')) {
+                                throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', serviceName));
+                            }
+                            throw new Error(getErrorMessage('invalidRequest', lang).replace('{service}', serviceName) + `\n${message}`);
+                        case 403:
+                            throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', serviceName));
+                        case 404:
+                            throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', serviceName));
+                        case 429:
+                            throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', serviceName));
+                        case 500:
+                        case 503:
+                            throw new Error(getErrorMessage('serverError', lang).replace('{service}', serviceName));
+                        default:
+                            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
                     }
-                    throw new Error(getErrorMessage('invalidRequest', lang).replace('{service}', 'Gemini') + `\n${message}`);
-                case 403:
-                    throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', 'Gemini'));
-                case 404:
-                    throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', 'Gemini'));
-                case 429:
-                    throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', 'Gemini'));
-                case 500:
-                case 503:
-                    throw new Error(getErrorMessage('serverError', lang).replace('{service}', 'Gemini'));
-                default:
-                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'Gemini') + `\n${message}`);
+                }
+                const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from Gemini API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
             }
         }
-        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'Gemini'));
-        if (!responseText) throw new Error('Invalid response structure from Gemini API.');
-        return responseText;
-    }, retryLimit, signal, lang);
+    }
+
+    throw lastError;
 }
 
-async function translateWithOpenAI(text, targetLanguage, retryLimit, signal, lang) {
-    const { openaiApiKey: apiKey, openaiModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['openaiApiKey', 'openaiModel', 'maxToken', 'timeout'], resolve));
-    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', 'OpenAI'));
-    const actualModel = (model || '').trim() || 'gpt-5-nano';
-    const prompt = createTranslationPrompt(text, targetLanguage);
-    const requestBody = {
-        model: actualModel,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 1,
-        max_completion_tokens: maxToken || 8192
-    };
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error?.message || `HTTP Error ${response.status}`;
-            switch (response.status) {
-                case 401:
-                    throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', 'OpenAI'));
-                case 429:
-                    if (message.includes("quota")) {
-                        throw new Error(getErrorMessage('insufficientQuota', lang).replace('{service}', 'OpenAI'));
+async function translateWithOpenAI(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', serviceName));
+
+    const endpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.openai.defaultEndpoint);
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.openai.defaultModels[0]);
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const prompt = createTranslationPrompt(text, targetLanguage);
+            const requestBody = {
+                model: actualModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 1,
+                max_completion_tokens: maxToken || 8192
+            };
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${endpoint.replace(/\/$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error?.message || `HTTP Error ${response.status}`;
+                    switch (response.status) {
+                        case 401:
+                            throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', serviceName));
+                        case 429:
+                            if (message.includes('quota')) {
+                                throw new Error(getErrorMessage('insufficientQuota', lang).replace('{service}', serviceName));
+                            }
+                            throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', serviceName));
+                        case 500:
+                        case 503:
+                            throw new Error(getErrorMessage('serverError', lang).replace('{service}', serviceName));
+                        default:
+                            if (message.includes('model_not_found')) {
+                                throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', serviceName));
+                            }
+                            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
                     }
-                    throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', 'OpenAI'));
-                case 500:
-                case 503:
-                    throw new Error(getErrorMessage('serverError', lang).replace('{service}', 'OpenAI'));
-                default:
-                     if (message.includes("model_not_found")) {
-                        throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', 'OpenAI'));
+                }
+                const responseText = data.choices?.[0]?.message?.content;
+                if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from OpenAI API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
+            }
+        }
+    }
+
+    throw lastError;
+}
+
+async function translateWithDeepSeek(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', serviceName));
+
+    const endpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.deepseek.defaultEndpoint);
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.deepseek.defaultModels[0]);
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const prompt = createTranslationPrompt(text, targetLanguage);
+            const requestBody = {
+                model: actualModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.2,
+                max_tokens: maxToken || 8192
+            };
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${endpoint.replace(/\/$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error?.message || `HTTP Error ${response.status}`;
+                    switch (response.status) {
+                        case 401:
+                            throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', serviceName));
+                        case 402:
+                            throw new Error(getErrorMessage('insufficientQuota', lang).replace('{service}', serviceName));
+                        case 429:
+                            throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', serviceName));
+                        case 500:
+                        case 503:
+                            throw new Error(getErrorMessage('serverError', lang).replace('{service}', serviceName));
+                        default:
+                            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
                     }
-                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'OpenAI') + `\n${message}`);
+                }
+                const responseText = data.choices?.[0]?.message?.content;
+                if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from DeepSeek API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
             }
         }
-        const responseText = data.choices?.[0]?.message?.content;
-        if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'OpenAI'));
-        if (!responseText) throw new Error('Invalid response structure from OpenAI API.');
-        return responseText;
-    }, retryLimit, signal, lang);
+    }
+
+    throw lastError;
 }
 
-async function translateWithDeepSeek(text, targetLanguage, retryLimit, signal, lang) {
-    const { deepseekApiKey: apiKey, deepseekModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['deepseekApiKey', 'deepseekModel', 'maxToken', 'timeout'], resolve));
-    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', 'DeepSeek'));
-    const actualModel = (model || '').trim() || 'deepseek-chat';
-    const prompt = createTranslationPrompt(text, targetLanguage);
-    const requestBody = {
-        model: actualModel,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: maxToken || 8192
-    };
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout('https://api.deepseek.com/v1/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error?.message || `HTTP Error ${response.status}`;
-            switch (response.status) {
-                case 401:
-                    throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', 'DeepSeek'));
-                case 402:
-                    throw new Error(getErrorMessage('insufficientQuota', lang).replace('{service}', 'DeepSeek'));
-                case 429:
-                    throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', 'DeepSeek'));
-                case 500:
-                case 503:
-                    throw new Error(getErrorMessage('serverError', lang).replace('{service}', 'DeepSeek'));
-                default:
-                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'DeepSeek') + `\n${message}`);
+async function translateWithAnthropic(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', serviceName));
+
+    const endpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.anthropic.defaultEndpoint);
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.anthropic.defaultModels[0]);
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const systemPrompt = `You are a professional translator. Your task is to translate the given text into ${getLanguageName(targetLanguage)}. The text contains special markers like [F_0], [F_1], etc. You MUST preserve these markers exactly as they are and in their correct relative positions in the translated text.`;
+            const userPrompt = `Translate the following text, keeping the markers like [F_0] in place:\n${text}`;
+            const requestBody = {
+                model: actualModel,
+                system: systemPrompt,
+                messages: [{ role: 'user', content: userPrompt }],
+                max_tokens: maxToken || 8192,
+                temperature: 0.2
+            };
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${endpoint.replace(/\/$/, '')}/messages`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error?.message || `HTTP Error ${response.status}`;
+                    switch (response.status) {
+                        case 401:
+                        case 403:
+                            throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', serviceName));
+                        case 429:
+                            throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', serviceName));
+                        case 500:
+                        case 529:
+                            throw new Error(getErrorMessage('serverError', lang).replace('{service}', serviceName));
+                        default:
+                            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
+                    }
+                }
+                const responseText = data.content?.[0]?.text;
+                if (data.stop_reason === 'max_tokens') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from Anthropic API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
             }
         }
-        const responseText = data.choices?.[0]?.message?.content;
-        if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'DeepSeek'));
-        if (!responseText) throw new Error('Invalid response structure from DeepSeek API.');
-        return responseText;
-    }, retryLimit, signal, lang);
+    }
+
+    throw lastError;
 }
 
-async function translateWithAnthropic(text, targetLanguage, retryLimit, signal, lang) {
-    const { anthropicApiKey: apiKey, anthropicModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['anthropicApiKey', 'anthropicModel', 'maxToken', 'timeout'], resolve));
-    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', 'Anthropic'));
-    const actualModel = (model || '').trim() || 'claude-sonnet-4-5-20250929';
-    const systemPrompt = `You are a professional translator. Your task is to translate the given text into ${getLanguageName(targetLanguage)}. The text contains special markers like [F_0], [F_1], etc. You MUST preserve these markers exactly as they are and in their correct relative positions in the translated text.`;
-    const userPrompt = `Translate the following text, keeping the markers like [F_0] in place:\n${text}`;
-    const requestBody = {
-        model: actualModel,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-        max_tokens: maxToken || 8192,
-        temperature: 0.2
-    };
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error?.message || `HTTP Error ${response.status}`;
-            switch (response.status) {
-                case 401:
-                case 403:
-                    throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', 'Anthropic'));
-                case 429:
-                    throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', 'Anthropic'));
-                case 500:
-                    throw new Error(getErrorMessage('serverError', lang).replace('{service}', 'Anthropic'));
-                case 529:
-                    throw new Error(getErrorMessage('serverError', lang).replace('{service}', 'Anthropic'));
-                default:
-                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'Anthropic') + `\n${message}`);
+async function translateWithXAI(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', serviceName));
+
+    const endpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.xai.defaultEndpoint);
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.xai.defaultModels[0]);
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const prompt = createTranslationPrompt(text, targetLanguage);
+            const requestBody = {
+                model: actualModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.2,
+                max_tokens: maxToken || 8192
+            };
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${endpoint.replace(/\/$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error?.message || `HTTP Error ${response.status}`;
+                    switch (response.status) {
+                        case 401:
+                        case 403:
+                            throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', serviceName));
+                        case 404:
+                            throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', serviceName));
+                        case 429:
+                            throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', serviceName));
+                        case 500:
+                        case 503:
+                            throw new Error(getErrorMessage('serverError', lang).replace('{service}', serviceName));
+                        default:
+                            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
+                    }
+                }
+                const responseText = data.choices?.[0]?.message?.content;
+                if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from xAI API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
             }
         }
-        const responseText = data.content?.[0]?.text;
-        if (data.stop_reason === 'max_tokens') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'Anthropic'));
-        if (!responseText) throw new Error('Invalid response structure from Anthropic API.');
-        return responseText;
-    }, retryLimit, signal, lang);
+    }
+
+    throw lastError;
 }
 
-async function translateWithXAI(text, targetLanguage, retryLimit, signal, lang) {
-    const { xaiApiKey: apiKey, xaiModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['xaiApiKey', 'xaiModel', 'maxToken', 'timeout'], resolve));
-    if (!apiKey) throw new Error(getErrorMessage('apiKeyNotSet', lang).replace('{service}', 'xAI'));
-    const actualModel = (model || '').trim() || 'grok-4-fast-non-reasoning';
-    const prompt = createTranslationPrompt(text, targetLanguage);
-    const requestBody = {
-        model: actualModel,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: maxToken || 8192
-    };
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout('https://api.x.ai/v1/chat/completions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error?.message || `HTTP Error ${response.status}`;
-            switch (response.status) {
-                case 401:
-                case 403:
-                    throw new Error(getErrorMessage('invalidApiKey', lang).replace('{service}', 'xAI'));
-                case 404:
-                    throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', 'xAI'));
-                case 429:
-                    throw new Error(getErrorMessage('apiLimitReached', lang).replace('{service}', 'xAI'));
-                case 500:
-                case 503:
-                    throw new Error(getErrorMessage('serverError', lang).replace('{service}', 'xAI'));
-                default:
-                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'xAI') + `\n${message}`);
-            }
-        }
-        const responseText = data.choices?.[0]?.message?.content;
-        if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'xAI'));
-        if (!responseText) throw new Error('Invalid response structure from xAI API.');
-        return responseText;
-    }, retryLimit, signal, lang);
-}
-
-async function translateWithOllama(text, targetLanguage, retryLimit, signal, lang) {
-    const { ollamaApiEndpoint: apiEndpoint, ollamaApiKey: apiKey, ollamaModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['ollamaApiEndpoint', 'ollamaApiKey', 'ollamaModel', 'maxToken', 'timeout'], resolve));
-    if (!apiEndpoint) throw new Error(getErrorMessage('apiEndpointNotSet', lang).replace('{service}', 'Ollama'));
-    const actualModel = (model || '').trim() || 'llama3';
+async function translateWithOllama(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    const apiEndpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.ollama.defaultEndpoint);
+    if (!apiEndpoint) throw new Error(getErrorMessage('apiEndpointNotSet', lang).replace('{service}', serviceName));
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.ollama.defaultModels[0]);
     const prompt = createTranslationPrompt(text, targetLanguage);
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    const requestBody = {
-        model: actualModel,
-        messages: [{ role: 'user', content: prompt }],
-        stream: false,
-        options: { "temperature": 0.2, "num_ctx": maxToken || 8192 }
-    };
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout(`${apiEndpoint.replace(/\/$/, '')}/api/chat`, {
-            method: 'POST', headers, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error || `HTTP Error ${response.status}`;
-            if (message.includes("model not found")) {
-                throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', 'Ollama'));
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const requestBody = {
+                model: actualModel || 'llama3',
+                messages: [{ role: 'user', content: prompt }],
+                stream: false,
+                options: { temperature: 0.2, num_ctx: maxToken || 8192 }
+            };
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${apiEndpoint.replace(/\/$/, '')}/api/chat`, {
+                    method: 'POST', headers, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error || `HTTP Error ${response.status}`;
+                    if (String(message).includes('model not found')) {
+                        throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', serviceName));
+                    }
+                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
+                }
+                const responseText = data.message?.content;
+                if (data?.done_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from Ollama API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
             }
-            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'Ollama') + `\n${message}`);
         }
-        const responseText = data.message?.content;
-        if (data?.done_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'Ollama'));
-        if (!responseText) throw new Error('Invalid response structure from Ollama API.');
-        return responseText;
-    }, retryLimit, signal, lang);
+    }
+
+    throw lastError;
 }
 
-async function translateWithLMStudio(text, targetLanguage, retryLimit, signal, lang) {
-    const { lmstudioApiEndpoint: apiEndpoint, lmstudioApiKey: apiKey, lmstudioModel: model, maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['lmstudioApiEndpoint', 'lmstudioApiKey', 'lmstudioModel', 'maxToken', 'timeout'], resolve));
-    if (!apiEndpoint) throw new Error(getErrorMessage('apiEndpointNotSet', lang).replace('{service}', 'LM Studio'));
-    const actualModel = (model || '').trim();
+async function translateWithLMStudio(text, targetLanguage, retryLimit, signal, lang, provider) {
+    const serviceName = getProviderDisplayName(provider);
+    const { maxToken, timeout } = await new Promise(resolve => chrome.storage.local.get(['maxToken', 'timeout'], resolve));
+    const apiKey = getModelApiKey(provider);
+    const apiEndpoint = resolveEndpoint(provider, BUILTIN_PROVIDER_TEMPLATES.lmstudio.defaultEndpoint);
+    if (!apiEndpoint) throw new Error(getErrorMessage('apiEndpointNotSet', lang).replace('{service}', serviceName));
+    const models = getModelCandidates(provider, BUILTIN_PROVIDER_TEMPLATES.lmstudio.defaultModels[0]);
     const prompt = createTranslationPrompt(text, targetLanguage);
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    const requestBody = {
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: maxToken > 0 ? maxToken : -1
-    };
-    if (actualModel) requestBody.model = actualModel;
-    return performTranslation(async () => {
-        const response = await fetchWithTimeout(`${apiEndpoint.replace(/\/$/, '')}/v1/chat/completions`, {
-            method: 'POST', headers, body: JSON.stringify(requestBody), signal
-        }, timeout || 300, lang);
-        const data = await response.json();
-        if (!response.ok) {
-            const message = data?.error?.message || `HTTP Error ${response.status}`;
-             if (message.includes("model_not_found")) {
-                throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', 'LM Studio'));
+    let lastError = null;
+
+    for (const actualModel of models) {
+        try {
+            const requestBody = {
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.2,
+                max_tokens: maxToken > 0 ? maxToken : -1
+            };
+            if (actualModel) requestBody.model = actualModel;
+            return await performTranslation(async () => {
+                const response = await fetchWithTimeout(`${apiEndpoint.replace(/\/$/, '')}/v1/chat/completions`, {
+                    method: 'POST', headers, body: JSON.stringify(requestBody), signal
+                }, timeout || 300, lang);
+                const data = await response.json();
+                if (!response.ok) {
+                    const message = data?.error?.message || `HTTP Error ${response.status}`;
+                    if (message.includes('model_not_found')) {
+                        throw new Error(getErrorMessage('modelNotFound', lang).replace('{service}', serviceName));
+                    }
+                    throw new Error(getErrorMessage('unknownError', lang).replace('{service}', serviceName) + `\n${message}`);
+                }
+                const responseText = data.choices?.[0]?.message?.content;
+                if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', serviceName));
+                if (!responseText) throw new Error('Invalid response structure from LM Studio API.');
+                return responseText;
+            }, retryLimit, signal, lang);
+        } catch (error) {
+            lastError = error;
+            if (!isModelMissingError(error, serviceName)) {
+                throw error;
             }
-            throw new Error(getErrorMessage('unknownError', lang).replace('{service}', 'LM Studio') + `\n${message}`);
         }
-        const responseText = data.choices?.[0]?.message?.content;
-        if (data.choices?.[0]?.finish_reason === 'length') throw new Error(getErrorMessage('maxTokensError', lang).replace('{service}', 'LM Studio'));
-        if (!responseText) throw new Error('Invalid response structure from LM Studio API.');
-        return responseText;
-    }, retryLimit, signal, lang);
+    }
+
+    throw lastError;
 }

@@ -10,42 +10,66 @@
     <h1 id="header">LLM Website Translator Settings</h1>
 
     <div class="form-group">
-      <label id="apiProviderLabel" for="apiProvider">API Provider:</label>
-      <select id="apiProvider">
-        <option value="gemini" selected>Gemini</option>
-        <option value="openai">OpenAI</option>
-        <option value="deepseek">DeepSeek</option>
-        <option value="anthropic">Anthropic</option>
-        <option value="xai">xAI</option>
-        <option value="ollama">Ollama(experimental)</option>
-        <option value="lmstudio">LM Studio(experimental)</option>
-      </select>
-      <p class="help-text" id="apiProviderHelp">Choose the API provider to use for translation.</p>
+      <label id="apiProviderLabel" for="apiProvider">Active Provider:</label>
+      <select id="apiProvider"></select>
+      <p class="help-text" id="apiProviderHelp">Choose the provider used for translation.</p>
     </div>
-    <div class="form-group" id="apiKeyGroup">
-      <label id="apiKeyLabel" for="apiKey">API Key:</label>
-      <input type="password" id="geminiApiKey" placeholder="Enter your Gemini API key" style="display: block;">
-      <input type="password" id="openaiApiKey" placeholder="Enter your OpenAI API key" style="display: none;">
-      <input type="password" id="deepseekApiKey" placeholder="Enter your DeepSeek API key" style="display: none;">
-      <input type="password" id="anthropicApiKey" placeholder="Enter your Anthropic API key" style="display: none;">
-      <input type="password" id="xaiApiKey" placeholder="Enter your xAI API key" style="display: none;">
-      <input type="password" id="ollamaApiKey" placeholder="Enter your Ollama API key (optional)" style="display: none;">
-      <input type="password" id="lmstudioApiKey" placeholder="Enter your LM Studio API key (optional)" style="display: none;">
-      <p class="help-text" id="apiKeyHelp"></p>
+
+    <div class="form-row">
+      <button id="saveProviderBtn" type="button">Save Provider</button>
+      <button id="testProviderBtn" type="button">Test Provider</button>
+      <button id="addProviderBtn" type="button">Add Provider</button>
+      <button id="duplicateProviderBtn" type="button">Duplicate Provider</button>
+      <button id="removeProviderBtn" type="button">Remove Provider</button>
     </div>
-    <div class="form-group" id="apiEndpointGroup" style="display: none;">
-       <label id="apiEndpointLabel" for="apiEndpoint">API Endpoint URL:</label>
-       <input type="text" id="ollamaApiEndpoint" placeholder="e.g., http://localhost:11434" style="display: none;">
-       <input type="text" id="lmstudioApiEndpoint" placeholder="e.g., http://localhost:1234" style="display: none;">
-       <p class="help-text" id="apiEndpointHelp"></p>
-    </div>
-    <div class="form-group" id="aiModelGroup">
-      <label id="aiModelLabel" for="aiModel">AI Model:</label>
-      <input type="text" id="aiModel" placeholder="e.g., gemini-2.0-flash-lite">
-      <p class="help-text" id="aiModelHelp"></p>
-    </div>
+    <div id="providerTestLog" class="test-log" aria-live="polite"></div>
+
     <div class="form-group">
-      <label for="targetLanguage">Language:</label>
+      <label id="providerNameLabel" for="providerName">Provider Name:</label>
+      <input type="text" id="providerName" placeholder="My OpenAI Proxy">
+      <p class="help-text" id="providerNameHelp">Display name shown in the provider list.</p>
+    </div>
+
+    <div class="form-group">
+      <label id="providerTypeLabel" for="providerType">Request Template:</label>
+      <select id="providerType">
+        <option value="gemini">Gemini</option>
+        <option value="openai">OpenAI-compatible</option>
+        <option value="deepseek">DeepSeek-compatible</option>
+        <option value="anthropic">Anthropic-compatible</option>
+        <option value="xai">xAI-compatible</option>
+        <option value="ollama">Ollama-compatible</option>
+        <option value="lmstudio">LM Studio-compatible</option>
+      </select>
+      <p class="help-text" id="providerTypeHelp">The API shape used when sending translation requests.</p>
+    </div>
+
+    <div class="form-group">
+      <label id="providerApiKeyLabel" for="providerApiKey">API Key:</label>
+      <input type="password" id="providerApiKey" placeholder="Enter the provider API key">
+      <p class="help-text" id="providerApiKeyHelp">Stored locally in the browser.</p>
+    </div>
+
+    <div class="form-group">
+      <label id="providerEndpointLabel" for="providerEndpoint">HTTP Endpoint URL:</label>
+      <input type="text" id="providerEndpoint" placeholder="Leave blank to use the default endpoint">
+      <p class="help-text" id="providerEndpointHelp">Optional. Overrides the default HTTP endpoint for this provider.</p>
+    </div>
+
+    <div class="form-group">
+      <label id="providerModelsLabel" for="providerModels">Model Names:</label>
+      <textarea id="providerModels" rows="4" placeholder="One model per line or comma separated"></textarea>
+      <p class="help-text" id="providerModelsHelp">Multiple model names are tried in order until one works.</p>
+    </div>
+
+    <div class="form-group">
+      <label id="providerUnloadLabel" for="providerUnloadAfterTranslation">Unload model after request:</label>
+      <input type="checkbox" id="providerUnloadAfterTranslation">
+      <p class="help-text" id="providerUnloadHelp">Useful for local Ollama-style providers.</p>
+    </div>
+
+    <div class="form-group">
+      <label id="languageLabel" for="targetLanguage">Language:</label>
       <select id="targetLanguage">
         <option value="en" selected>English</option>
         <option value="ja">日本語</option>
@@ -92,21 +116,16 @@
       <p class="help-text" id="concurrencyLimitHelp"></p>
     </div>
     <div class="form-group">
-        <label id="maxRetriesLabel" for="maxRetries">Max Retries on Error:</label>
-        <input type="number" id="maxRetries" min="0" max="10" placeholder="">
-        <p class="help-text" id="maxRetriesHelp"></p>
+      <label id="maxRetriesLabel" for="maxRetries">Max Retries on Error:</label>
+      <input type="number" id="maxRetries" min="0" max="10" placeholder="">
+      <p class="help-text" id="maxRetriesHelp"></p>
     </div>
     <div class="form-group">
-        <label id="timeoutLabel" for="timeout">API Request Timeout (seconds):</label>
-        <input type="number" id="timeout" min="1" max="600" placeholder="">
-        <p class="help-text" id="timeoutHelp"></p>
+      <label id="timeoutLabel" for="timeout">API Request Timeout (seconds):</label>
+      <input type="number" id="timeout" min="1" max="600" placeholder="">
+      <p class="help-text" id="timeoutHelp"></p>
     </div>
 
-    <div class="form-group" id="ollamaUnloadGroup">
-      <label id="ollamaUnloadLabel" for="ollamaUnloadAfterTranslation">Unload Ollama Model After Request:</label>
-      <input type="checkbox" id="ollamaUnloadAfterTranslation">
-      <p class="help-text" id="ollamaUnloadHelp"></p>
-    </div>
     <div class="form-group">
       <label id="toggleBlueBackgroundLabel" for="toggleBlueBackground">Translated Text Blue Background:</label>
       <input type="checkbox" id="toggleBlueBackground">
@@ -138,7 +157,7 @@ https://www.example.org"></textarea>
     <div id="status"></div>
   </div>
   <div style="text-align: center; margin-top: 20px;">
-    <a href="https://forms.gle/hcNDcg1E2D9TWGPV9" target="_blank" id="supportLink">お問い合わせ</a>
+    <a href="https://forms.gle/hcNDcg1E2D9TWGPV9" target="_blank" id="supportLink">Support</a>
   </div>
   <script src="options.js"></script>
 </body>

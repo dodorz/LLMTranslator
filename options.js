@@ -1,83 +1,554 @@
-document.addEventListener('DOMContentLoaded', async () => {
+const BUILTIN_PROVIDER_TEMPLATES = {
+    gemini: {
+        id: 'gemini',
+        name: 'Gemini',
+        type: 'gemini',
+        defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+        defaultModels: ['gemini-flash-lite-latest'],
+        apiKeyRequired: true
+    },
+    openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        type: 'openai',
+        defaultEndpoint: 'https://api.openai.com/v1',
+        defaultModels: ['gpt-5-nano'],
+        apiKeyRequired: true
+    },
+    deepseek: {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        type: 'deepseek',
+        defaultEndpoint: 'https://api.deepseek.com/v1',
+        defaultModels: ['deepseek-chat'],
+        apiKeyRequired: true
+    },
+    anthropic: {
+        id: 'anthropic',
+        name: 'Anthropic',
+        type: 'anthropic',
+        defaultEndpoint: 'https://api.anthropic.com/v1',
+        defaultModels: ['claude-sonnet-4-5-20250929'],
+        apiKeyRequired: true
+    },
+    xai: {
+        id: 'xai',
+        name: 'xAI',
+        type: 'xai',
+        defaultEndpoint: 'https://api.x.ai/v1',
+        defaultModels: ['grok-4-fast-non-reasoning'],
+        apiKeyRequired: true
+    },
+    ollama: {
+        id: 'ollama',
+        name: 'Ollama',
+        type: 'ollama',
+        defaultEndpoint: 'http://localhost:11434',
+        defaultModels: ['llama3'],
+        apiKeyRequired: false
+    },
+    lmstudio: {
+        id: 'lmstudio',
+        name: 'LM Studio',
+        type: 'lmstudio',
+        defaultEndpoint: 'http://localhost:1234',
+        defaultModels: [''],
+        apiKeyRequired: false
+    }
+};
+
+const PROVIDER_TYPE_OPTIONS = [
+    { value: 'gemini', label: 'Gemini' },
+    { value: 'openai', label: 'OpenAI-compatible' },
+    { value: 'deepseek', label: 'DeepSeek-compatible' },
+    { value: 'anthropic', label: 'Anthropic-compatible' },
+    { value: 'xai', label: 'xAI-compatible' },
+    { value: 'ollama', label: 'Ollama-compatible' },
+    { value: 'lmstudio', label: 'LM Studio-compatible' }
+];
+
+let providerConfigs = [];
+let selectedProviderId = '';
+let currentLang = 'en';
+let currentTestRequestId = null;
+let statusHideTimerId = null;
+
+document.addEventListener('DOMContentLoaded', initOptionsPage);
+
+async function initOptionsPage() {
     try {
         const items = await chrome.storage.local.get([
-            'targetLanguage', 'apiProvider', 'geminiApiKey', 'openaiApiKey', 'deepseekApiKey', 'anthropicApiKey', 'xaiApiKey',
-            'ollamaApiKey', 'lmstudioApiKey', 'ollamaApiEndpoint', 'lmstudioApiEndpoint',
-            'geminiModel', 'openaiModel', 'deepseekModel', 'anthropicModel', 'xaiModel', 'ollamaModel', 'lmstudioModel',
-            'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit',
-            'maxRetries', 'timeout',
-            'ollamaUnloadAfterTranslation',
-            'toggleBlueBackground', 'realTimeTranslation', 'showProgressPopup', 'excludeList', 'hidePromptAllSites'
+            'targetLanguage',
+            'apiProvider',
+            'providerConfigs',
+            'batchSize',
+            'maxBatchLength',
+            'delayBetweenRequests',
+            'maxToken',
+            'concurrencyLimit',
+            'maxRetries',
+            'timeout',
+            'toggleBlueBackground',
+            'realTimeTranslation',
+            'showProgressPopup',
+            'excludeList',
+            'hidePromptAllSites'
         ]);
 
-        let lang = items.targetLanguage || 'en';
-        updateUITranslations(lang);
-        document.getElementById('apiProvider').value = items.apiProvider || 'gemini';
-        document.getElementById('geminiApiKey').value = items.geminiApiKey || '';
-        document.getElementById('openaiApiKey').value = items.openaiApiKey || '';
-        document.getElementById('deepseekApiKey').value = items.deepseekApiKey || '';
-        document.getElementById('anthropicApiKey').value = items.anthropicApiKey || '';
-        document.getElementById('xaiApiKey').value = items.xaiApiKey || '';
-        document.getElementById('ollamaApiKey').value = items.ollamaApiKey || '';
-        document.getElementById('lmstudioApiKey').value = items.lmstudioApiKey || '';
-        document.getElementById('ollamaApiEndpoint').value = items.ollamaApiEndpoint || '';
-        document.getElementById('lmstudioApiEndpoint').value = items.lmstudioApiEndpoint || '';
-        document.getElementById('targetLanguage').value = items.targetLanguage || 'en';
-        document.getElementById('batchSize').value = items.batchSize || 80;
-        document.getElementById('maxBatchLength').value = items.maxBatchLength || 5000;
-        document.getElementById('delayBetweenRequests').value = items.delayBetweenRequests || 2500;
-        document.getElementById('maxToken').value = items.maxToken || 8192;
-        document.getElementById('concurrencyLimit').value = items.concurrencyLimit || 10;
-        document.getElementById('maxRetries').value = items.maxRetries !== undefined ? items.maxRetries : 3;
-        document.getElementById('timeout').value = items.timeout || 300;
-        document.getElementById('ollamaUnloadAfterTranslation').checked = items.ollamaUnloadAfterTranslation === true;
-        document.getElementById('toggleBlueBackground').checked = items.toggleBlueBackground === true;
-        document.getElementById('realTimeTranslation').checked = items.realTimeTranslation === true;
-        document.getElementById('showProgressPopup').checked = items.showProgressPopup !== false;
-        document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites === true;
-        document.getElementById('excludeList').value = (items.excludeList && Array.isArray(items.excludeList)) ? items.excludeList.join('\n') : '';
-        
-        const provider = items.apiProvider || 'gemini';
-        const modelKey = provider + 'Model';
-        document.getElementById('aiModel').value = items[modelKey] || '';
-        updateApiFields(provider, lang);
+        currentLang = items.targetLanguage || 'en';
+        providerConfigs = normalizeProviderConfigs(items);
+        selectedProviderId = (items.apiProvider && providerConfigs.some(config => config.id === items.apiProvider))
+            ? items.apiProvider
+            : (providerConfigs[0]?.id || '');
 
+        renderProviderSelect();
+        bindProviderControls();
+        fillSettings(items);
+        renderSelectedProvider();
+        updateUiText();
     } catch (error) {
-        console.error("Error loading settings:", error);
+        console.error('Error loading settings:', error);
+        showStatus('Error loading settings.', 'error');
     }
+}
+
+function normalizeProviderConfigs(items) {
+    if (Array.isArray(items.providerConfigs)) {
+        return items.providerConfigs.map((config, index) => normalizeProviderConfig(config, index));
+    }
+
+    return Object.keys(BUILTIN_PROVIDER_TEMPLATES).map(id => {
+        const template = BUILTIN_PROVIDER_TEMPLATES[id];
+        const legacy = buildLegacyProviderSnapshot(items, id, template);
+        return normalizeProviderConfig({
+            id,
+            name: template.name,
+            type: template.type,
+            apiKey: legacy.apiKey,
+            endpoint: legacy.endpoint,
+            models: legacy.models,
+            unloadAfterTranslation: legacy.unloadAfterTranslation
+        });
+    });
+}
+
+function buildLegacyProviderSnapshot(items, id, template) {
+    const apiKeyMap = {
+        gemini: items.geminiApiKey,
+        openai: items.openaiApiKey,
+        deepseek: items.deepseekApiKey,
+        anthropic: items.anthropicApiKey,
+        xai: items.xaiApiKey,
+        ollama: items.ollamaApiKey,
+        lmstudio: items.lmstudioApiKey
+    };
+    const endpointMap = {
+        gemini: items.geminiApiEndpoint,
+        openai: items.openaiApiEndpoint,
+        deepseek: items.deepseekApiEndpoint,
+        anthropic: items.anthropicApiEndpoint,
+        xai: items.xaiApiEndpoint,
+        ollama: items.ollamaApiEndpoint,
+        lmstudio: items.lmstudioApiEndpoint
+    };
+    const modelMap = {
+        gemini: items.geminiModel,
+        openai: items.openaiModel,
+        deepseek: items.deepseekModel,
+        anthropic: items.anthropicModel,
+        xai: items.xaiModel,
+        ollama: items.ollamaModel,
+        lmstudio: items.lmstudioModel
+    };
+
+    return {
+        apiKey: (apiKeyMap[id] || '').trim?.() || '',
+        endpoint: (endpointMap[id] || '').trim?.() || template.defaultEndpoint,
+        models: parseModels(modelMap[id] || template.defaultModels.join('\n')),
+        unloadAfterTranslation: items.ollamaUnloadAfterTranslation === true && id === 'ollama'
+    };
+}
+
+function normalizeProviderConfig(config, index) {
+    const template = BUILTIN_PROVIDER_TEMPLATES[config?.type] || BUILTIN_PROVIDER_TEMPLATES[config?.id] || BUILTIN_PROVIDER_TEMPLATES.openai;
+    const id = sanitizeProviderId(config?.id || config?.name || `${template.id}-${index}`);
+    return {
+        id,
+        name: (config?.name || template.name || id).trim(),
+        type: normalizeProviderType(config?.type || template.type),
+        apiKey: (config?.apiKey || '').trim(),
+        endpoint: (config?.endpoint || template.defaultEndpoint || '').trim(),
+        models: parseModels(Array.isArray(config?.models) ? config.models.join('\n') : (config?.models || config?.model || template.defaultModels.join('\n'))),
+        unloadAfterTranslation: config?.unloadAfterTranslation === true
+    };
+}
+
+function normalizeProviderType(type) {
+    return PROVIDER_TYPE_OPTIONS.some(option => option.value === type) ? type : 'openai';
+}
+
+function sanitizeProviderId(value) {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return normalized || 'provider';
+}
+
+function parseModels(input) {
+    if (Array.isArray(input)) {
+        return input.map(item => String(item || '').trim()).filter(Boolean);
+    }
+    return String(input || '')
+        .split(/[\n,]/)
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
+function formatModels(models) {
+    return (models && models.length > 0 ? models : ['']).join('\n');
+}
+
+function getProviderConfig(providerId) {
+    return providerConfigs.find(config => config.id === providerId) || null;
+}
+
+function renderProviderSelect() {
+    const select = document.getElementById('apiProvider');
+    select.innerHTML = '';
+
+    providerConfigs.forEach(config => {
+        const option = document.createElement('option');
+        option.value = config.id;
+        option.textContent = config.name;
+        select.appendChild(option);
+    });
+
+    if (providerConfigs.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No provider configured';
+        option.disabled = true;
+        option.selected = true;
+        select.appendChild(option);
+    }
+
+    select.value = selectedProviderId;
+}
+
+function bindProviderControls() {
+    const providerSelect = document.getElementById('apiProvider');
+    providerSelect.addEventListener('change', async () => {
+        try {
+            await persistCurrentProvider();
+        } catch (error) {
+            console.error('Error auto-saving provider before switching:', error);
+            showStatus('Error saving provider.', 'error');
+            providerSelect.value = selectedProviderId;
+            return;
+        }
+        selectedProviderId = providerSelect.value;
+        renderSelectedProvider();
+    });
+
+    document.getElementById('saveProviderBtn').addEventListener('click', async () => {
+        await persistCurrentProvider('Provider saved.');
+    });
+
+    document.getElementById('testProviderBtn').addEventListener('click', async () => {
+        await testCurrentProvider();
+    });
+
+    document.getElementById('addProviderBtn').addEventListener('click', async () => {
+        saveSelectedProviderFromForm();
+        const provider = createDefaultCustomProvider();
+        providerConfigs.push(provider);
+        selectedProviderId = provider.id;
+        renderProviderSelect();
+        renderSelectedProvider();
+        await persistProviderConfigs('Provider added.');
+    });
+
+    document.getElementById('duplicateProviderBtn').addEventListener('click', async () => {
+        saveSelectedProviderFromForm();
+        const current = getProviderConfig(selectedProviderId);
+        if (!current) {
+            return;
+        }
+        const duplicate = {
+            ...current,
+            id: generateUniqueProviderId(`${current.name}-copy`),
+            name: `${current.name} Copy`
+        };
+        providerConfigs.push(duplicate);
+        selectedProviderId = duplicate.id;
+        renderProviderSelect();
+        renderSelectedProvider();
+        await persistProviderConfigs('Provider duplicated.');
+    });
+
+    document.getElementById('removeProviderBtn').addEventListener('click', async () => {
+        const current = getProviderConfig(selectedProviderId);
+        if (!current) {
+            showStatus('No provider selected.', 'error');
+            return;
+        }
+        providerConfigs = providerConfigs.filter(config => config.id !== current.id);
+        selectedProviderId = providerConfigs[0]?.id || '';
+        renderProviderSelect();
+        renderSelectedProvider();
+        await persistProviderConfigs('Provider removed.');
+    });
+
+    document.getElementById('providerType').addEventListener('change', () => {
+        renderProviderHints();
+    });
+
+    document.getElementById('saveBtn').addEventListener('click', saveSettings);
+}
+
+chrome.runtime.onMessage.addListener((request) => {
+    if (request.action !== 'testProviderStatus') {
+        return false;
+    }
+    if (!currentTestRequestId || request.requestId !== currentTestRequestId) {
+        return false;
+    }
+    setProviderTestLog(request.message || 'Testing provider...', request.type || 'info');
+    showStatus(request.message || 'Testing provider...', request.type || 'info', 0);
+    return false;
 });
 
-document.getElementById('apiProvider').addEventListener('change', async function() {
-    const provider = this.value;
-    const lang = document.getElementById('targetLanguage').value || 'en';
-    updateApiFields(provider, lang);
+function fillSettings(items) {
+    document.getElementById('targetLanguage').value = items.targetLanguage || 'en';
+    document.getElementById('batchSize').value = items.batchSize || 80;
+    document.getElementById('maxBatchLength').value = items.maxBatchLength || 5000;
+    document.getElementById('delayBetweenRequests').value = items.delayBetweenRequests || 2500;
+    document.getElementById('maxToken').value = items.maxToken || 8192;
+    document.getElementById('concurrencyLimit').value = items.concurrencyLimit || 10;
+    document.getElementById('maxRetries').value = items.maxRetries !== undefined ? items.maxRetries : 3;
+    document.getElementById('timeout').value = items.timeout || 300;
+    document.getElementById('toggleBlueBackground').checked = items.toggleBlueBackground === true;
+    document.getElementById('realTimeTranslation').checked = items.realTimeTranslation === true;
+    document.getElementById('showProgressPopup').checked = items.showProgressPopup !== false;
+    document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites === true;
+    document.getElementById('excludeList').value = Array.isArray(items.excludeList) ? items.excludeList.join('\n') : '';
+}
+
+function renderSelectedProvider() {
+    const provider = getProviderConfig(selectedProviderId) || null;
+    if (!provider) {
+        document.getElementById('providerName').value = '';
+        document.getElementById('providerApiKey').value = '';
+        document.getElementById('providerEndpoint').value = '';
+        document.getElementById('providerModels').value = '';
+        document.getElementById('providerUnloadAfterTranslation').checked = false;
+        document.getElementById('providerType').disabled = false;
+        document.getElementById('saveProviderBtn').disabled = true;
+        document.getElementById('testProviderBtn').disabled = true;
+        document.getElementById('duplicateProviderBtn').disabled = true;
+        document.getElementById('removeProviderBtn').disabled = true;
+        return;
+    }
+
+    const select = document.getElementById('apiProvider');
+    if (select.value !== provider.id) {
+        select.value = provider.id;
+    }
+
+    document.getElementById('providerName').value = provider.name || '';
+    document.getElementById('providerType').value = provider.type || 'openai';
+    document.getElementById('providerApiKey').value = provider.apiKey || '';
+    document.getElementById('providerEndpoint').value = provider.endpoint || '';
+    document.getElementById('providerModels').value = formatModels(provider.models);
+    document.getElementById('providerUnloadAfterTranslation').checked = provider.unloadAfterTranslation === true;
+
+    document.getElementById('providerType').disabled = false;
+    document.getElementById('saveProviderBtn').disabled = false;
+    document.getElementById('testProviderBtn').disabled = false;
+    document.getElementById('duplicateProviderBtn').disabled = false;
+    document.getElementById('removeProviderBtn').disabled = false;
+
+    renderProviderHints();
+    updateProviderPlaceholder();
+}
+
+function renderProviderHints() {
+    const type = document.getElementById('providerType').value || 'openai';
+    const template = BUILTIN_PROVIDER_TEMPLATES[type] || BUILTIN_PROVIDER_TEMPLATES.openai;
+    const providerType = type;
+
+    document.getElementById('providerEndpointHelp').textContent = `Default endpoint: ${template.defaultEndpoint}`;
+    document.getElementById('providerModelsHelp').textContent = template.defaultModels.length > 1
+        ? 'Multiple model names are tried in order.'
+        : 'Multiple model names are tried in order until one works.';
+    document.getElementById('providerUnloadHelp').textContent = providerType === 'ollama' || providerType === 'lmstudio'
+        ? 'Useful for local providers that can unload the active model.'
+        : 'Usually only needed for local providers.';
+}
+
+function updateProviderPlaceholder() {
+    const type = document.getElementById('providerType').value || 'openai';
+    const template = BUILTIN_PROVIDER_TEMPLATES[type] || BUILTIN_PROVIDER_TEMPLATES.openai;
+    document.getElementById('providerApiKey').placeholder = template.apiKeyRequired
+        ? `Enter the ${template.name} API key`
+        : `Enter the ${template.name} API key (optional)`;
+    document.getElementById('providerEndpoint').placeholder = template.defaultEndpoint;
+    document.getElementById('providerModels').placeholder = template.defaultModels.join('\n');
+}
+
+function saveSelectedProviderFromForm() {
+    const current = getProviderConfig(selectedProviderId);
+    if (!current) {
+        return;
+    }
+
+    const updated = {
+        ...current,
+        name: document.getElementById('providerName').value.trim() || current.name,
+        type: document.getElementById('providerType').value || current.type,
+        apiKey: document.getElementById('providerApiKey').value.trim(),
+        endpoint: document.getElementById('providerEndpoint').value.trim(),
+        models: parseModels(document.getElementById('providerModels').value),
+        unloadAfterTranslation: document.getElementById('providerUnloadAfterTranslation').checked
+    };
+
+    providerConfigs = providerConfigs.map(config => config.id === current.id ? updated : config);
+}
+
+function buildProviderFromCurrentForm() {
+    const current = getProviderConfig(selectedProviderId);
+    if (!current) {
+        return null;
+    }
+    return {
+        ...current,
+        name: document.getElementById('providerName').value.trim() || current.name,
+        type: document.getElementById('providerType').value || current.type,
+        apiKey: document.getElementById('providerApiKey').value.trim(),
+        endpoint: document.getElementById('providerEndpoint').value.trim(),
+        models: parseModels(document.getElementById('providerModels').value),
+        unloadAfterTranslation: document.getElementById('providerUnloadAfterTranslation').checked
+    };
+}
+
+async function persistCurrentProvider(statusMessage) {
+    saveSelectedProviderFromForm();
+    await persistProviderConfigs(statusMessage);
+}
+
+async function testCurrentProvider() {
+    const provider = buildProviderFromCurrentForm();
+    if (!provider) {
+        showStatus('No provider selected.', 'error');
+        return;
+    }
+
+    const testLanguage = document.getElementById('targetLanguage').value || 'en';
+    const testButton = document.getElementById('testProviderBtn');
+    const previousLabel = testButton.textContent;
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    currentTestRequestId = requestId;
+    testButton.disabled = true;
+    testButton.textContent = 'Testing...';
+    setProviderTestLog('Preparing provider test...', 'info');
+    showStatus('Preparing provider test...', 'info', 0);
+
     try {
-        const items = await chrome.storage.local.get([provider + 'Model']);
-        document.getElementById('aiModel').value = items[provider + 'Model'] || '';
+        const response = await sendRuntimeMessage({
+            action: 'testProvider',
+            requestId,
+            provider,
+            targetLanguage: testLanguage
+        });
+        if (!response) {
+            throw new Error('No response from background.');
+        }
+        if (!response.success) {
+            throw new Error(response.error || 'Provider test failed.');
+        }
+        setProviderTestLog(response.message || 'Provider test succeeded.', 'success');
+        showStatus(response.message || 'Provider test succeeded.', 'success', 8000);
     } catch (error) {
-        console.error("Error getting model for provider:", error);
+        console.error('Provider test failed:', error);
+        setProviderTestLog(error.message || 'Provider test failed.', 'error');
+        showStatus(error.message || 'Provider test failed.', 'error', 8000);
+    } finally {
+        if (currentTestRequestId === requestId) {
+            currentTestRequestId = null;
+        }
+        testButton.disabled = false;
+        testButton.textContent = previousLabel;
     }
-});
+}
 
-document.getElementById('targetLanguage').addEventListener('change', function() {
-    const lang = this.value;
-    updateUITranslations(lang);
-    const provider = document.getElementById('apiProvider').value;
-    updateApiFields(provider, lang);
-});
+function sendRuntimeMessage(message) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(message, response => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
+            resolve(response);
+        });
+    });
+}
 
-document.getElementById('saveBtn').addEventListener('click', async () => {
-    const apiProvider = document.getElementById('apiProvider').value;
-    const geminiApiKey = document.getElementById('geminiApiKey').value.trim();
-    const openaiApiKey = document.getElementById('openaiApiKey').value.trim();
-    const deepseekApiKey = document.getElementById('deepseekApiKey').value.trim();
-    const anthropicApiKey = document.getElementById('anthropicApiKey').value.trim();
-    const xaiApiKey = document.getElementById('xaiApiKey').value.trim();
-    const ollamaApiKey = document.getElementById('ollamaApiKey').value.trim();
-    const lmstudioApiKey = document.getElementById('lmstudioApiKey').value.trim();
-    const ollamaApiEndpoint = document.getElementById('ollamaApiEndpoint').value.trim();
-    const lmstudioApiEndpoint = document.getElementById('lmstudioApiEndpoint').value.trim();
-    const aiModel = document.getElementById('aiModel').value.trim();
+async function persistProviderConfigs(statusMessage) {
+    const saveData = {
+        apiProvider: selectedProviderId || '',
+        providerConfigs: providerConfigs.map(config => ({
+            ...config,
+            models: Array.isArray(config.models) ? config.models : parseModels(config.models)
+        }))
+    };
+    const provider = getProviderConfig(selectedProviderId);
+    if (provider) {
+        Object.assign(saveData, buildLegacyStorageSnapshot(provider));
+    }
+
+    try {
+        await chrome.storage.local.set(saveData);
+        if (statusMessage) {
+            showStatus(statusMessage, 'success');
+        }
+    } catch (error) {
+        console.error('Error saving provider config:', error);
+        showStatus('Error saving provider.', 'error');
+    }
+}
+
+function createDefaultCustomProvider() {
+    const type = 'openai';
+    const template = BUILTIN_PROVIDER_TEMPLATES[type];
+    const id = generateUniqueProviderId('custom-provider');
+    return {
+        id,
+        name: 'Custom Provider',
+        type,
+        apiKey: '',
+        endpoint: template.defaultEndpoint,
+        models: [...template.defaultModels],
+        unloadAfterTranslation: false
+    };
+}
+
+function generateUniqueProviderId(baseId) {
+    const sanitized = sanitizeProviderId(baseId);
+    let candidate = sanitized;
+    let counter = 1;
+    while (providerConfigs.some(config => config.id === candidate)) {
+        candidate = `${sanitized}-${counter++}`;
+    }
+    return candidate;
+}
+
+async function saveSettings() {
+    saveSelectedProviderFromForm();
+    const provider = getProviderConfig(selectedProviderId);
+
     const targetLanguage = document.getElementById('targetLanguage').value;
     const batchSize = parseInt(document.getElementById('batchSize').value, 10) || 80;
     const maxBatchLength = parseInt(document.getElementById('maxBatchLength').value, 10) || 5000;
@@ -86,185 +557,161 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     const concurrencyLimit = parseInt(document.getElementById('concurrencyLimit').value, 10) || 10;
     const maxRetries = parseInt(document.getElementById('maxRetries').value, 10);
     const timeout = parseInt(document.getElementById('timeout').value, 10);
-    const ollamaUnloadAfterTranslation = document.getElementById('ollamaUnloadAfterTranslation').checked;
     const toggleBlueBackground = document.getElementById('toggleBlueBackground').checked;
     const realTimeTranslation = document.getElementById('realTimeTranslation').checked;
     const showProgressPopup = document.getElementById('showProgressPopup').checked;
     const hidePromptAllSites = document.getElementById('hidePromptAllSites').checked;
-    const excludeList = document.getElementById('excludeList').value.split(/\r?\n/).map(url => url.trim()).filter(url => url);
-    const lang = targetLanguage || 'en';
-    const translations = optionsTranslations[lang] || optionsTranslations.en;
-    const modelKey = apiProvider + 'Model';
+    const excludeList = document.getElementById('excludeList').value.split(/\r?\n/).map(url => url.trim()).filter(Boolean);
 
     const saveData = {
-        apiProvider: apiProvider,
-        geminiApiKey: geminiApiKey,
-        openaiApiKey: openaiApiKey,
-        deepseekApiKey: deepseekApiKey,
-        anthropicApiKey: anthropicApiKey,
-        xaiApiKey: xaiApiKey,
-        ollamaApiKey: ollamaApiKey,
-        lmstudioApiKey: lmstudioApiKey,
-        ollamaApiEndpoint: ollamaApiEndpoint,
-        lmstudioApiEndpoint: lmstudioApiEndpoint,
-        [modelKey]: aiModel,
-        targetLanguage: targetLanguage,
-        batchSize: batchSize,
-        maxBatchLength: maxBatchLength,
-        delayBetweenRequests: delayBetweenRequests,
-        maxToken: maxToken,
-        concurrencyLimit: concurrencyLimit,
+        targetLanguage,
+        apiProvider: selectedProviderId || '',
+        providerConfigs: providerConfigs.map(config => ({
+            ...config,
+            models: Array.isArray(config.models) ? config.models : parseModels(config.models)
+        })),
+        batchSize,
+        maxBatchLength,
+        delayBetweenRequests,
+        maxToken,
+        concurrencyLimit,
         maxRetries: (maxRetries >= 0 && maxRetries <= 10) ? maxRetries : 3,
         timeout: (timeout >= 1 && timeout <= 600) ? timeout : 300,
-        ollamaUnloadAfterTranslation: ollamaUnloadAfterTranslation,
-        toggleBlueBackground: toggleBlueBackground,
-        realTimeTranslation: realTimeTranslation,
-        showProgressPopup: showProgressPopup,
-        hidePromptAllSites: hidePromptAllSites,
-        excludeList: excludeList
+        toggleBlueBackground,
+        realTimeTranslation,
+        showProgressPopup,
+        hidePromptAllSites,
+        excludeList
     };
+
+    if (provider) {
+        Object.assign(saveData, buildLegacyStorageSnapshot(provider));
+    }
 
     try {
         await chrome.storage.local.set(saveData);
-        showStatus(translations.savedSettings, 'success');
-        updateUITranslations(targetLanguage);
+        showStatus('Settings saved!', 'success');
     } catch (error) {
-        console.error("Error saving settings:", error);
-        showStatus("Error saving settings.", 'error');
+        console.error('Error saving settings:', error);
+        showStatus('Error saving settings.', 'error');
     }
-});
-
-function updateApiFields(provider, lang) {
-    const tr = optionsTranslations[lang] || optionsTranslations.en;
-    const apiKeyHelp = {
-        gemini: tr.apiKeyHelpGemini,
-        openai: tr.apiKeyHelpOpenAI,
-        deepseek: tr.apiKeyHelpDeepSeek,
-        anthropic: tr.apiKeyHelpAnthropic,
-        xai: tr.apiKeyHelpXAI,
-        ollama: tr.apiKeyHelpOllama,
-        lmstudio: tr.apiKeyHelpLMStudio
-    };
-    const apiEndpointHelp = {
-        ollama: tr.apiEndpointHelpOllama,
-        lmstudio: tr.apiEndpointHelpLMStudio
-    };
-    const aiModelHelp = {
-        gemini: tr.aiModelHelpGemini,
-        openai: tr.aiModelHelpOpenAI,
-        deepseek: tr.aiModelHelpDeepSeek,
-        anthropic: tr.aiModelHelpAnthropic,
-        xai: tr.aiModelHelpXAI,
-        ollama: tr.aiModelHelpOllama,
-        lmstudio: tr.aiModelHelpLMStudio
-    };
-    const aiModelPlaceholder = {
-        gemini: tr.aiModelPlaceholderGemini,
-        openai: tr.aiModelPlaceholderOpenAI,
-        deepseek: tr.aiModelPlaceholderDeepSeek,
-        anthropic: tr.aiModelPlaceholderAnthropic,
-        xai: tr.aiModelPlaceholderXAI,
-        ollama: tr.aiModelPlaceholderOllama,
-        lmstudio: tr.aiModelPlaceholderLMStudio
-    };
-    document.getElementById('apiKeyHelp').innerHTML = apiKeyHelp[provider] || '';
-    document.getElementById('aiModelHelp').innerHTML = aiModelHelp[provider] || '';
-    document.getElementById('aiModel').placeholder = aiModelPlaceholder[provider] || '';
-    ['gemini', 'openai', 'deepseek', 'anthropic', 'xai', 'ollama', 'lmstudio'].forEach(p => {
-        document.getElementById(`${p}ApiKey`).style.display = (provider === p) ? 'block' : 'none';
-    });
-    const showEndpoint = (provider === 'ollama' || provider === 'lmstudio');
-    document.getElementById('apiEndpointGroup').style.display = showEndpoint ? 'block' : 'none';
-    document.getElementById('ollamaApiEndpoint').style.display = (provider === 'ollama') ? 'block' : 'none';
-    document.getElementById('lmstudioApiEndpoint').style.display = (provider === 'lmstudio') ? 'block' : 'none';
-    document.getElementById('apiEndpointHelp').textContent = apiEndpointHelp[provider] || '';
-    document.getElementById('ollamaUnloadGroup').style.display = (provider === 'ollama') ? 'block' : 'none';
-    document.getElementById('apiKeyLabel').textContent = tr.apiKeyLabel || 'API Key:';
 }
 
-function updateUITranslations(lang) {
-    const tr = optionsTranslations[lang] || optionsTranslations.en;
-    document.getElementById('pageTitle').textContent = tr.pageTitle;
-    document.getElementById('header').textContent = tr.header;
-    document.getElementById('apiProviderLabel').textContent = tr.apiProviderLabel;
-    document.getElementById('apiProviderHelp').textContent = tr.apiProviderHelp;
-    document.getElementById('apiKeyLabel').textContent = tr.apiKeyLabel;
-    document.getElementById('geminiApiKey').placeholder = tr.apiKeyPlaceholderGemini;
-    document.getElementById('openaiApiKey').placeholder = tr.apiKeyPlaceholderOpenAI;
-    document.getElementById('deepseekApiKey').placeholder = tr.apiKeyPlaceholderDeepSeek;
-    document.getElementById('anthropicApiKey').placeholder = tr.apiKeyPlaceholderAnthropic;
-    document.getElementById('xaiApiKey').placeholder = tr.apiKeyPlaceholderXAI;
-    document.getElementById('ollamaApiKey').placeholder = tr.apiKeyPlaceholderOllama;
-    document.getElementById('lmstudioApiKey').placeholder = tr.apiKeyPlaceholderLMStudio;
-    document.getElementById('apiEndpointLabel').textContent = tr.apiEndpointLabel;
-    document.getElementById('ollamaApiEndpoint').placeholder = tr.apiEndpointPlaceholderOllama;
-    document.getElementById('lmstudioApiEndpoint').placeholder = tr.apiEndpointPlaceholderLMStudio;
-    document.getElementById('aiModelLabel').textContent = tr.aiModelLabel;
-    document.getElementById('batchSizeLabel').textContent = tr.batchSizeLabel;
-    document.getElementById('batchSizeHelp').textContent = tr.batchSizeHelp;
-    document.getElementById('maxBatchLengthLabel').textContent = tr.maxBatchLengthLabel;
-    document.getElementById('maxBatchLengthHelp').textContent = tr.maxBatchLengthHelp;
-    document.getElementById('delayBetweenRequestsLabel').textContent = tr.delayBetweenRequestsLabel;
-    document.getElementById('delayBetweenRequestsHelp').textContent = tr.delayBetweenRequestsHelp;
-    document.getElementById('maxTokenLabel').textContent = tr.maxTokenLabel;
-    document.getElementById('maxTokenHelp').textContent = tr.maxTokenHelp;
-    document.getElementById('concurrencyLimitLabel').textContent = tr.concurrencyLimitLabel;
-    document.getElementById('concurrencyLimitHelp').textContent = tr.concurrencyLimitHelp;
-    document.getElementById('maxRetriesLabel').textContent = tr.maxRetriesLabel;
-    document.getElementById('maxRetriesHelp').textContent = tr.maxRetriesHelp;
-    document.getElementById('timeoutLabel').textContent = tr.timeoutLabel;
-    document.getElementById('timeoutHelp').textContent = tr.timeoutHelp;
-    document.getElementById('ollamaUnloadLabel').textContent = tr.ollamaUnloadLabel;
-    document.getElementById('ollamaUnloadHelp').textContent = tr.ollamaUnloadHelp;
-    document.getElementById('toggleBlueBackgroundLabel').textContent = tr.toggleBlueBackgroundLabel;
-    document.getElementById('toggleBlueBackgroundHelp').textContent = tr.toggleBlueBackgroundHelp;
-    document.getElementById('autoTranslationLabel').textContent = tr.autoTranslationLabel;
-    document.getElementById('autoTranslationHelp').textContent = tr.autoTranslationHelp;
-    document.getElementById('showProgressPopupLabel').textContent = tr.showProgressPopupLabel;
-    document.getElementById('showProgressPopupHelp').textContent = tr.showProgressPopupHelp;
-    document.getElementById('hidePromptAllSitesLabel').textContent = tr.hidePromptAllSitesLabel;
-    document.getElementById('hidePromptAllSitesHelp').textContent = tr.hidePromptAllSitesHelp;
-    document.getElementById('excludeListLabel').textContent = tr.excludeListLabel;
-    document.getElementById('excludeListHelp').textContent = tr.excludeListHelp;
-    document.getElementById('saveBtn').textContent = tr.saveBtn;
-    document.getElementById('supportLink').textContent = tr.supportLink;
-    document.title = tr.pageTitle;
-    document.getElementById('batchSize').placeholder = tr.batchSizePlaceholder;
-    document.getElementById('maxBatchLength').placeholder = tr.maxBatchLengthPlaceholder;
-    document.getElementById('delayBetweenRequests').placeholder = tr.delayBetweenRequestsPlaceholder;
-    document.getElementById('maxToken').placeholder = tr.maxTokenPlaceholder;
-    document.getElementById('concurrencyLimit').placeholder = tr.concurrencyLimitPlaceholder;
-    document.getElementById('maxRetries').placeholder = tr.maxRetriesPlaceholder;
-    document.getElementById('timeout').placeholder = tr.timeoutPlaceholder;
-    const provider = document.getElementById('apiProvider').value;
-    updateApiFields(provider, lang);
+function buildLegacyStorageSnapshot(provider) {
+    const legacy = {};
+    const byType = provider?.type || 'openai';
+    if (byType === 'gemini') {
+        legacy.geminiApiKey = provider.apiKey || '';
+        legacy.geminiApiEndpoint = provider.endpoint || '';
+        legacy.geminiModel = provider.models?.[0] || '';
+    } else if (byType === 'openai') {
+        legacy.openaiApiKey = provider.apiKey || '';
+        legacy.openaiApiEndpoint = provider.endpoint || '';
+        legacy.openaiModel = provider.models?.[0] || '';
+    } else if (byType === 'deepseek') {
+        legacy.deepseekApiKey = provider.apiKey || '';
+        legacy.deepseekApiEndpoint = provider.endpoint || '';
+        legacy.deepseekModel = provider.models?.[0] || '';
+    } else if (byType === 'anthropic') {
+        legacy.anthropicApiKey = provider.apiKey || '';
+        legacy.anthropicApiEndpoint = provider.endpoint || '';
+        legacy.anthropicModel = provider.models?.[0] || '';
+    } else if (byType === 'xai') {
+        legacy.xaiApiKey = provider.apiKey || '';
+        legacy.xaiApiEndpoint = provider.endpoint || '';
+        legacy.xaiModel = provider.models?.[0] || '';
+    } else if (byType === 'ollama') {
+        legacy.ollamaApiKey = provider.apiKey || '';
+        legacy.ollamaApiEndpoint = provider.endpoint || '';
+        legacy.ollamaModel = provider.models?.[0] || '';
+        legacy.ollamaUnloadAfterTranslation = provider.unloadAfterTranslation === true;
+    } else if (byType === 'lmstudio') {
+        legacy.lmstudioApiKey = provider.apiKey || '';
+        legacy.lmstudioApiEndpoint = provider.endpoint || '';
+        legacy.lmstudioModel = provider.models?.[0] || '';
+    }
+    return legacy;
 }
 
-function showStatus(message, type) {
+function updateUiText() {
+    const currentProviderType = document.getElementById('providerType').value || 'openai';
+    document.getElementById('pageTitle').textContent = 'LLM Website Translator Settings';
+    document.getElementById('header').textContent = 'LLM Website Translator Settings';
+    document.getElementById('apiProviderLabel').textContent = 'Active Provider:';
+    document.getElementById('apiProviderHelp').textContent = 'Choose the provider used for translation.';
+    document.getElementById('providerNameLabel').textContent = 'Provider Name:';
+    document.getElementById('providerNameHelp').textContent = 'Display name shown in the provider list.';
+    document.getElementById('providerTypeLabel').textContent = 'Request Template:';
+    document.getElementById('providerTypeHelp').textContent = 'The API shape used when sending translation requests.';
+    document.getElementById('providerApiKeyLabel').textContent = 'API Key:';
+    document.getElementById('providerApiKeyHelp').textContent = 'Stored locally in the browser.';
+    document.getElementById('providerEndpointLabel').textContent = 'HTTP Endpoint URL:';
+    document.getElementById('providerEndpointHelp').textContent = 'Optional. Overrides the default HTTP endpoint for this provider.';
+    document.getElementById('providerModelsLabel').textContent = 'Model Names:';
+    document.getElementById('providerModelsHelp').textContent = 'Multiple model names are tried in order until one works.';
+    document.getElementById('providerUnloadLabel').textContent = 'Unload model after request:';
+    document.getElementById('providerUnloadHelp').textContent = 'Useful for local Ollama-style providers.';
+    document.getElementById('languageLabel').textContent = 'Language:';
+    document.getElementById('saveProviderBtn').textContent = 'Save Provider';
+    document.getElementById('testProviderBtn').textContent = 'Test Provider';
+    document.getElementById('addProviderBtn').textContent = 'Add Provider';
+    document.getElementById('duplicateProviderBtn').textContent = 'Duplicate Provider';
+    document.getElementById('removeProviderBtn').textContent = 'Remove Provider';
+    document.getElementById('batchSizeLabel').textContent = 'Batch Size (Number of Texts):';
+    document.getElementById('batchSizeHelp').textContent = 'Max number of text pieces per API request. Larger values can be faster but may cause errors.';
+    document.getElementById('maxBatchLengthLabel').textContent = 'Max Batch Length (Characters):';
+    document.getElementById('maxBatchLengthHelp').textContent = 'Maximum total characters per API request (batch). Prevents exceeding API input limits.';
+    document.getElementById('delayBetweenRequestsLabel').textContent = 'Delay Between Requests (ms):';
+    document.getElementById('delayBetweenRequestsHelp').textContent = 'Wait time between API calls. Longer delays can help avoid rate limit errors.';
+    document.getElementById('maxTokenLabel').textContent = 'Max Output Tokens:';
+    document.getElementById('maxTokenHelp').textContent = 'Maximum length of translated text returned in one response.';
+    document.getElementById('concurrencyLimitLabel').textContent = 'Concurrency Limit:';
+    document.getElementById('concurrencyLimitHelp').textContent = 'Maximum number of API requests processed in parallel.';
+    document.getElementById('maxRetriesLabel').textContent = 'Max Retries on Error:';
+    document.getElementById('maxRetriesHelp').textContent = 'Maximum retry count for failed requests.';
+    document.getElementById('timeoutLabel').textContent = 'API Request Timeout (seconds):';
+    document.getElementById('timeoutHelp').textContent = 'Maximum time to wait for an API response.';
+    document.getElementById('toggleBlueBackgroundLabel').textContent = 'Translated Text Blue Background:';
+    document.getElementById('toggleBlueBackgroundHelp').textContent = 'Toggle whether translated text gets a blue background.';
+    document.getElementById('autoTranslationLabel').textContent = 'Automatic Translation:';
+    document.getElementById('autoTranslationHelp').textContent = 'If enabled, text to translate will be translated automatically.';
+    document.getElementById('showProgressPopupLabel').textContent = 'Show Progress Popup:';
+    document.getElementById('showProgressPopupHelp').textContent = 'Toggle whether to show a progress popup during translation.';
+    document.getElementById('hidePromptAllSitesLabel').textContent = 'Hide Translation Prompt for All Sites:';
+    document.getElementById('hidePromptAllSitesHelp').textContent = 'If enabled, the translation prompt will not appear on any site.';
+    document.getElementById('excludeListLabel').textContent = 'List of Sites to Exclude:';
+    document.getElementById('excludeListHelp').textContent = 'Enter each URL on a new line. Sites listed here will not be translated automatically.';
+    document.getElementById('saveBtn').textContent = 'Save Settings';
+    document.getElementById('supportLink').textContent = 'Support';
+    document.title = 'LLM Website Translator Settings';
+
+    document.getElementById('providerType').innerHTML = PROVIDER_TYPE_OPTIONS.map(option => `<option value="${option.value}">${option.label}</option>`).join('');
+    document.getElementById('providerType').value = currentProviderType;
+}
+
+function setProviderTestLog(message, type) {
+    const log = document.getElementById('providerTestLog');
+    if (!log) {
+        return;
+    }
+    log.textContent = message || '';
+    log.className = `test-log ${type || 'info'}`;
+}
+
+function showStatus(message, type, durationMs = 3000) {
     const status = document.getElementById('status');
+    if (statusHideTimerId) {
+        clearTimeout(statusHideTimerId);
+        statusHideTimerId = null;
+    }
     status.textContent = message;
     status.className = type;
     status.style.display = 'block';
-    setTimeout(function() {
-        status.style.display = 'none';
-        status.className = '';
-    }, 3000);
+    if (durationMs > 0) {
+        statusHideTimerId = setTimeout(() => {
+            status.style.display = 'none';
+            status.className = '';
+            statusHideTimerId = null;
+        }, durationMs);
+    }
 }
-const optionsTranslations = {
-    en: { pageTitle: 'LLM Website Translator Settings', header: 'LLM Website Translator Settings', apiProviderLabel: 'API Provider:', apiProviderHelp: 'Choose the API provider to use for translation.', apiKeyLabel: 'API Key:', apiEndpointLabel: 'API Endpoint URL:', apiKeyHelpGemini: 'Get your API key from <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiKeyHelpOpenAI: 'Get your API key from <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiKeyHelpDeepSeek: 'Get your API key from <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiKeyHelpAnthropic: 'Get your API key from <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiKeyHelpXAI: 'Get your API key from <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiKeyHelpOllama: 'Enter your Ollama API key (optional). <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiKeyHelpLMStudio: 'Enter your LM Studio API key (optional). <br><i>Note: The API key is stored locally on your PC. Please be cautious when using on shared computers.</i>', apiEndpointHelpOllama: 'Enter the URL of your Ollama API endpoint.', apiEndpointHelpLMStudio: 'Enter the URL of your LM Studio API endpoint.', apiKeyPlaceholderGemini: 'Enter your Gemini API key', apiKeyPlaceholderOpenAI: 'Enter your OpenAI API key', apiKeyPlaceholderDeepSeek: 'Enter your DeepSeek API key', apiKeyPlaceholderAnthropic: 'Enter your Anthropic API key', apiKeyPlaceholderXAI: 'Enter your xAI API key', apiKeyPlaceholderOllama: 'Enter your Ollama API key (optional)', apiKeyPlaceholderLMStudio: 'Enter your LM Studio API key (optional)', apiEndpointPlaceholderOllama: 'e.g., http://localhost:11434', apiEndpointPlaceholderLMStudio: 'e.g., http://localhost:1234', aiModelLabel: 'AI Model:', aiModelHelpGemini: 'If left blank, gemini-flash-lite-latest will be used. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelHelpOpenAI: 'If left blank, gpt-5-nano will be used. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelHelpDeepSeek: 'If left blank, deepseek-chat will be used. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelHelpAnthropic: 'If left blank, claude-sonnet-4-5-20250929 will be used. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelHelpXAI: 'If left blank, grok-4-fast-non-reasoning will be used. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelHelpOllama: 'Enter the model name to use with Ollama (e.g., llama3).We recommend models with inference performance equivalent to or higher than gemma-3-12b. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelHelpLMStudio: 'Enter the model name loaded in LM Studio.We recommend models with inference performance equivalent to or higher than gemma-3-12b. <i>The accuracy and speed of translation are greatly affected by the capabilities and characteristics of the model used.</i>', aiModelPlaceholderGemini: 'e.g., gemini-flash-lite-latest', aiModelPlaceholderOpenAI: 'e.g., gpt-5-nano', aiModelPlaceholderDeepSeek: 'e.g., deepseek-chat', aiModelPlaceholderAnthropic: 'e.g., claude-sonnet-4-5-20250929', aiModelPlaceholderXAI: 'e.g., grok-4-fast-non-reasoning', aiModelPlaceholderOllama: 'e.g., llama3', aiModelPlaceholderLMStudio: 'e.g., loaded-model-name', batchSizeLabel: 'Batch Size (Number of Texts):', batchSizeHelp: 'Max number of text pieces per API request. Larger values can be faster but may cause errors.', batchSizePlaceholder: 'Default: 80', maxBatchLengthLabel: 'Max Batch Length (Characters):', maxBatchLengthHelp: 'Max total characters per API request (batch). Prevents exceeding API input limits.', maxBatchLengthPlaceholder: 'Default: 5000', delayBetweenRequestsLabel: 'Delay Between Requests (ms):', delayBetweenRequestsHelp: 'Waiting time between API calls. Longer delays can help avoid rate limit errors.', delayBetweenRequestsPlaceholder: 'Default: 2500', maxTokenLabel: 'Max Output Tokens:', maxTokenHelp: 'Max length of the translated text returned by the API in one response. Prevents cutoff.', maxTokenPlaceholder: 'Default: 8192', concurrencyLimitLabel: 'Concurrency Limit:', concurrencyLimitHelp: 'Maximum number of API requests to process in parallel. Higher values may speed up translation but can increase the risk of API rate limit errors.', concurrencyLimitPlaceholder: 'Default: 10', maxRetriesLabel: 'Max Retries on Error:', maxRetriesHelp: 'Maximum number of times to retry an API request upon failure (excluding rate limit errors). Uses exponential backoff with jitter.', maxRetriesPlaceholder: 'Default: 3', timeoutLabel: 'API Request Timeout (seconds):', timeoutHelp: 'Maximum time to wait for an API response. Longer timeouts are useful for slow models or networks.', timeoutPlaceholder: 'Default: 300', ollamaUnloadLabel: 'Unload Ollama Model After Request:', ollamaUnloadHelp: '(Ollama only) If enabled, the model will be unloaded from memory after each translation request to save resources. This may slow down subsequent translations.', toggleBlueBackgroundLabel: 'Translated Text Blue Background:', toggleBlueBackgroundHelp: 'Toggle whether to apply a blue background to translated texts.', autoTranslationLabel: 'Automatic Translation:', autoTranslationHelp: 'If enabled, the texts to be translated will be automatically translated.', showProgressPopupLabel: 'Show Progress Popup:', showProgressPopupHelp: 'Toggle whether to display a popup during translation.', hidePromptAllSitesLabel: 'Hide Translation Prompt for All Sites:', hidePromptAllSitesHelp: 'If enabled, the translation prompt will not appear on any site.', excludeListLabel: 'List of Sites to Exclude:', excludeListHelp: 'Enter each URL on a new line. Sites listed here will not be automatically translated.', saveBtn: 'Save Settings', savedSettings: 'Settings saved!', supportLink: 'Contact Us', cancelling: 'Cancelling...' },
-    ja: { pageTitle: 'LLM ウェブサイト翻訳設定', header: 'LLM ウェブサイト翻訳設定', apiProviderLabel: 'APIプロバイダー:', apiProviderHelp: '翻訳に使用するAIプロバイダーを選択してください。', apiKeyLabel: 'APIキー:', apiEndpointLabel: 'APIエンドポイントURL:', apiKeyHelpGemini: '<a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>からAPIキーを取得してください。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiKeyHelpOpenAI: '<a href="https://platform.openai.com/" target="_blank">OpenAI</a>からAPIキーを取得してください。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiKeyHelpDeepSeek: '<a href="https://deepseek.com/" target="_blank">DeepSeek</a>からAPIキーを取得してください。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiKeyHelpAnthropic: '<a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>からAPIキーを取得してください。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiKeyHelpXAI: '<a href="https://xai.com/" target="_blank">xAI</a>からAPIキーを取得してください。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiKeyHelpOllama: 'Ollama APIキーを入力してください (任意)。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiKeyHelpLMStudio: 'LM Studio APIキーを入力してください (任意)。<br><i>※APIキーはPCのローカルストレージに保存されます。共有PCなどでの利用にはご注意ください。</i>', apiEndpointHelpOllama: 'Ollama APIエンドポイントのURLを入力してください。', apiEndpointHelpLMStudio: 'LM Studio APIエンドポイントのURLを入力してください。', apiKeyPlaceholderGemini: 'Gemini APIキーを入力してください', apiKeyPlaceholderOpenAI: 'OpenAI APIキーを入力してください', apiKeyPlaceholderDeepSeek: 'DeepSeek APIキーを入力してください', apiKeyPlaceholderAnthropic: 'Anthropic APIキーを入力してください', apiKeyPlaceholderXAI: 'xAI APIキーを入力してください', apiKeyPlaceholderOllama: 'Ollama APIキーを入力 (任意)', apiKeyPlaceholderLMStudio: 'LM Studio APIキーを入力 (任意)', apiEndpointPlaceholderOllama: '例: http://localhost:11434', apiEndpointPlaceholderLMStudio: '例: http://localhost:1234', aiModelLabel: 'AIモデル:', aiModelHelpGemini: '空白の場合、gemini-flash-lite-latestが使用されます。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelHelpOpenAI: '空白の場合、gpt-5-nanoが使用されます。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelHelpDeepSeek: '空白の場合、deepseek-chatが使用されます。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelHelpAnthropic: '空白の場合、claude-sonnet-4-5-20250929が使用されます。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelHelpXAI: '空白の場合、grok-4-fast-non-reasoningが使用されます。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelHelpOllama: 'Ollamaで使用するモデル名を入力してください (例: llama3)。gemma-3-12b以上の推論性能をもつモデルを推奨します。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelHelpLMStudio: 'LM Studioでロードしたモデル名を入力してください。gemma-3-12b以上の推論性能をもつモデルを推奨します。<i>※翻訳の精度や速度は使用するモデルの能力や特徴に大きく影響されます。</i>', aiModelPlaceholderGemini: '例: gemini-flash-lite-latest', aiModelPlaceholderOpenAI: '例: gpt-5-nano', aiModelPlaceholderDeepSeek: '例: deepseek-chat', aiModelPlaceholderAnthropic: '例: claude-sonnet-4-5-20250929', aiModelPlaceholderXAI: '例: grok-4-fast-non-reasoning', aiModelPlaceholderOllama: '例: llama3', aiModelPlaceholderLMStudio: '例: ロードしたモデル名', batchSizeLabel: 'バッチサイズ (テキスト数):', batchSizeHelp: '一度のAPIリクエストで送るテキストの最大「個数」。大きいほど高速ですが、エラーの原因にもなります。', batchSizePlaceholder: 'デフォルト値: 80', maxBatchLengthLabel: '最大バッチ長 (文字数):', maxBatchLengthHelp: '一度のAPIリクエストで送るテキストの最大「合計文字数」。APIの入力上限超過を防ぎます。', maxBatchLengthPlaceholder: 'デフォルト値: 5000', delayBetweenRequestsLabel: 'リクエスト間隔 (ミリ秒):', delayBetweenRequestsHelp: 'API呼び出し間の待機時間。長く設定するとレート制限エラーを回避できます。', delayBetweenRequestsPlaceholder: 'デフォルト値: 2500', maxTokenLabel: '最大出力トークン数:', maxTokenHelp: '一度のAPI応答で受け取る翻訳結果の最大長（トークン数）。翻訳結果の途中切れを防ぎます。', maxTokenPlaceholder: 'デフォルト値: 8192', concurrencyLimitLabel: '並列処理数:', concurrencyLimitHelp: '同時に処理するAPIリクエストの最大数。値を大きくすると翻訳が速くなる可能性がありますが、APIのレート制限エラーのリスクが高まります。', concurrencyLimitPlaceholder: 'デフォルト値: 10', maxRetriesLabel: 'エラー時の最大リトライ回数:', maxRetriesHelp: 'APIリクエスト失敗時の最大リトライ回数（レート制限エラーを除く）。指数バックオフ（+ジッター）を使用します。', maxRetriesPlaceholder: 'デフォルト値: 3', timeoutLabel: 'APIリクエストタイムアウト (秒):', timeoutHelp: 'API応答を待機する最大時間。応答の遅いモデルやネットワーク環境で役立ちます。', timeoutPlaceholder: 'デフォルト値: 300', ollamaUnloadLabel: 'リクエスト後にOllamaモデルをアンロード:', ollamaUnloadHelp: '（Ollamaのみ）有効にすると、リソース節約のため各翻訳リクエスト後にモデルをメモリからアンロードします。これにより次回の翻訳が遅くなる可能性があります。', toggleBlueBackgroundLabel: '翻訳済みテキストの青背景:', toggleBlueBackgroundHelp: '翻訳済みの文章に青背景を適用するかどうかを切り替えます。', autoTranslationLabel: '自動翻訳:', autoTranslationHelp: 'オンにすると自動的に翻訳対象のテキストを翻訳します。', showProgressPopupLabel: '進捗ポップアップ表示:', showProgressPopupHelp: '翻訳中に進捗状況を示すポップアップを表示するかどうかを切り替えます。', hidePromptAllSitesLabel: 'すべてのサイトで翻訳確認を非表示:', hidePromptAllSitesHelp: '有効にすると、どのサイトでも翻訳確認ポップアップが表示されません。', excludeListLabel: '翻訳を使用しないサイト一覧:', excludeListHelp: '各URLは改行区切りで入力してください。これらのサイトは自動翻訳されません。', saveBtn: '設定を保存', savedSettings: '設定を保存しました！', supportLink: 'お問い合わせ', cancelling: '停止処理中...' },
-    fr: { pageTitle: "Paramètres du traducteur de site Web LLM", header: "Paramètres du traducteur de site Web LLM", apiProviderLabel: "Fournisseur API :", apiProviderHelp: "Choisissez le fournisseur API à utiliser pour la traduction.", apiKeyLabel: "Clé API :", apiEndpointLabel: "URL du point de terminaison API :", apiKeyHelpGemini: 'Obtenez votre clé API sur <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>', apiKeyHelpOpenAI: 'Obtenez votre clé API sur <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>', apiKeyHelpDeepSeek: 'Obtenez votre clé API sur <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>', apiKeyHelpAnthropic: 'Obtenez votre clé API sur <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>', apiKeyHelpXAI: 'Obtenez votre clé API sur <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>', apiKeyHelpOllama: "Entrez votre clé API Ollama (facultatif). <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>", apiKeyHelpLMStudio: "Entrez votre clé API LM Studio (facultatif). <br><i>Remarque : La clé API est stockée localement sur votre PC. Soyez prudent lorsque vous l\'utilisez sur des ordinateurs partagés.</i>", apiEndpointHelpOllama: "Entrez l'URL de votre point de terminaison API Ollama.", apiEndpointHelpLMStudio: "Entrez l'URL de votre point de terminaison API LM Studio.", apiKeyPlaceholderGemini: "Entrez votre clé API Gemini", apiKeyPlaceholderOpenAI: "Entrez votre clé API OpenAI", apiKeyPlaceholderDeepSeek: "Entrez votre clé API DeepSeek", apiKeyPlaceholderAnthropic: "Entrez votre clé API Anthropic", apiKeyPlaceholderXAI: "Entrez votre clé API xAI", apiKeyPlaceholderOllama: "Entrez votre clé API Ollama (facultatif)", apiKeyPlaceholderLMStudio: "Entrez votre clé API LM Studio (facultatif)", apiEndpointPlaceholderOllama: "ex. : http://localhost:11434", apiEndpointPlaceholderLMStudio: "ex. : http://localhost:1234", aiModelLabel: "Modèle AI :", aiModelHelpGemini: "Si vide, gemini-flash-lite-latest sera utilisé. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelHelpOpenAI: "Si vide, gpt-5-nano sera utilisé. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelHelpDeepSeek: "Si vide, deepseek-chat sera utilisé. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelHelpAnthropic: "Si vide, claude-sonnet-4-5-20250929 sera utilisé. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelHelpXAI: "Si vide, grok-4-fast-non-reasoning sera utilisé. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelHelpOllama: "Entrez le nom du modèle à utiliser avec Ollama (ex. : llama3).Nous recommandons des modèles avec des performances d'inférence équivalentes ou supérieures à gemma-3-12b. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelHelpLMStudio: "Entrez le nom du modèle chargé dans LM Studio.Nous recommandons des modèles avec des performances d'inférence équivalentes ou supérieures à gemma-3-12b. <i>L'exactitude et la vitesse de la traduction sont grandement affectées par les capacités et les caractéristiques du modèle utilisé.</i>", aiModelPlaceholderGemini: "ex. : gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "ex. : gpt-5-nano", aiModelPlaceholderDeepSeek: "ex. : deepseek-chat", aiModelPlaceholderAnthropic: "ex. : claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "ex. : grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "ex. : llama3", aiModelPlaceholderLMStudio: "ex. : nom-modèle-chargé", batchSizeLabel: "Taille du lot (nombre de textes) :", batchSizeHelp: "Nombre maximum de textes par requête API. Des valeurs plus élevées peuvent être plus rapides mais peuvent causer des erreurs.", batchSizePlaceholder: "Défaut : 80", maxBatchLengthLabel: "Longueur maximale du lot (caractères) :", maxBatchLengthHelp: "Nombre total maximum de caractères par requête API (lot). Empêche le dépassement des limites d'entrée de l'API.", maxBatchLengthPlaceholder: "Défaut : 5000", delayBetweenRequestsLabel: "Délai entre les requêtes (ms) :", delayBetweenRequestsHelp: "Temps d'attente entre les appels API. Des délais plus longs peuvent aider à éviter les erreurs de limitation de débit.", delayBetweenRequestsPlaceholder: "Défaut : 2500", maxTokenLabel: "Jetons de sortie max :", maxTokenHelp: "Longueur maximale du texte traduit renvoyé par l'API en une seule réponse. Empêche la coupure.", maxTokenPlaceholder: "Défaut : 8192", concurrencyLimitLabel: "Limite de simultanéité :", concurrencyLimitHelp: "Nombre maximum de requêtes API à traiter en parallèle. Des valeurs plus élevées peuvent accélérer la traduction mais augmenter le risque d'erreurs de limitation de débit API.", concurrencyLimitPlaceholder: "Défaut : 10", maxRetriesLabel: "Nombre maximal de tentatives en cas d'erreur :", maxRetriesHelp: "Nombre maximal de tentatives de relance d'une requête API en cas d'échec (hors erreurs de limitation de débit). Utilise un backoff exponentiel avec jitter.", maxRetriesPlaceholder: "Défaut : 3", timeoutLabel: "Délai d'attente de la requête API (secondes) :", timeoutHelp: "Temps maximum d'attente pour une réponse API. Utile pour les modèles lents ou les réseaux.", timeoutPlaceholder: "Défaut : 300", ollamaUnloadLabel: "Décharger le modèle Ollama après la requête :", ollamaUnloadHelp: "(Ollama uniquement) Si activé, le modèle sera déchargé de la mémoire après chaque requête de traduction pour économiser les ressources. Cela peut ralentir les traductions suivantes.", toggleBlueBackgroundLabel: "Fond bleu pour le texte traduit :", toggleBlueBackgroundHelp: "Activer ou désactiver l'application d'un fond bleu aux textes traduits.", autoTranslationLabel: "Traduction automatique :", autoTranslationHelp: "Si activé, les textes à traduire seront automatiquement traduits.", showProgressPopupLabel: "Afficher la fenêtre contextuelle de progression :", showProgressPopupHelp: "Activer ou désactiver l'affichage d'une fenêtre contextuelle pendant la traduction.", hidePromptAllSitesLabel: "Masquer l'invite de traduction pour tous les sites :", hidePromptAllSitesHelp: "Si activé, l'invite de traduction ne s'affichera sur aucun site.", excludeListLabel: "Liste des sites à exclure :", excludeListHelp: "Entrez chaque URL sur une nouvelle ligne. Les sites listés ici ne seront pas traduits automatiquement.", saveBtn: "Enregistrer les paramètres", savedSettings: "Paramètres enregistrés !", supportLink: "Contactez-nous", cancelling: "Annulation..." },
-    de: { pageTitle: "Einstellungen für den LLM Website Translator", header: "Einstellungen für den LLM Website Translator", apiProviderLabel: "API-Anbieter:", apiProviderHelp: "Wählen Sie den API-Anbieter für die Übersetzung aus.", apiKeyLabel: "API-Schlüssel:", apiEndpointLabel: "API-Endpunkt-URL:", apiKeyHelpGemini: 'Holen Sie sich Ihren API-Schlüssel von <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>', apiKeyHelpOpenAI: 'Holen Sie sich Ihren API-Schlüssel von <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>', apiKeyHelpDeepSeek: 'Holen Sie sich Ihren API-Schlüssel von <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>', apiKeyHelpAnthropic: 'Holen Sie sich Ihren API-Schlüssel von <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>', apiKeyHelpXAI: 'Holen Sie sich Ihren API-Schlüssel von <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>', apiKeyHelpOllama: "Geben Sie Ihren Ollama API-Schlüssel ein (optional). <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>", apiKeyHelpLMStudio: "Geben Sie Ihren LM Studio API-Schlüssel ein (optional). <br><i>Hinweis: Der API-Schlüssel wird lokal auf Ihrem PC gespeichert. Seien Sie vorsichtig bei der Verwendung auf gemeinsam genutzten Computern.</i>", apiEndpointHelpOllama: "Geben Sie die URL Ihres Ollama API-Endpunkts ein.", apiEndpointHelpLMStudio: "Geben Sie die URL Ihres LM Studio API-Endpunkts ein.", apiKeyPlaceholderGemini: "Geben Sie Ihren Gemini API-Schlüssel ein", apiKeyPlaceholderOpenAI: "Geben Sie Ihren OpenAI API-Schlüssel ein", apiKeyPlaceholderDeepSeek: "Geben Sie Ihren DeepSeek API-Schlüssel ein", apiKeyPlaceholderAnthropic: "Geben Sie Ihren Anthropic API-Schlüssel ein", apiKeyPlaceholderXAI: "Geben Sie Ihren xAI API-Schlüssel ein", apiKeyPlaceholderOllama: "Geben Sie Ihren Ollama API-Schlüssel ein (optional)", apiKeyPlaceholderLMStudio: "Geben Sie Ihren LM Studio API-Schlüssel ein (optional)", apiEndpointPlaceholderOllama: "z.B. http://localhost:11434", apiEndpointPlaceholderLMStudio: "z.B. http://localhost:1234", aiModelLabel: "KI-Modell:", aiModelHelpGemini: "Wenn leer, wird gemini-flash-lite-latest verwendet. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelHelpOpenAI: "Wenn leer, wird gpt-5-nano verwendet. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelHelpDeepSeek: "Wenn leer, wird deepseek-chat verwendet. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelHelpAnthropic: "Wenn leer, wird claude-sonnet-4-5-20250929 verwendet. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelHelpXAI: "Wenn leer, wird grok-4-fast-non-reasoning verwendet. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelHelpOllama: "Geben Sie den Modellnamen für Ollama ein (z.B. llama3).Wir empfehlen Modelle mit einer Inferenzleistung, die gemma-3-12b entspricht oder höher ist. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelHelpLMStudio: "Geben Sie den in LM Studio geladenen Modellnamen ein.Wir empfehlen Modelle mit einer Inferenzleistung, die gemma-3-12b entspricht oder höher ist. <i>Die Genauigkeit und Geschwindigkeit der Übersetzung wird stark von den Fähigkeiten und Eigenschaften des verwendeten Modells beeinflusst.</i>", aiModelPlaceholderGemini: "z.B. gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "z.B. gpt-5-nano", aiModelPlaceholderDeepSeek: "z.B. deepseek-chat", aiModelPlaceholderAnthropic: "z.B. claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "z.B. grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "z.B. llama3", aiModelPlaceholderLMStudio: "z.B. geladenes-modell-name", batchSizeLabel: "Batch-Größe (Anzahl der Texte):", batchSizeHelp: "Maximale Anzahl von Textstücken pro API-Anfrage. Größere Werte können schneller sein, aber Fehler verursachen.", batchSizePlaceholder: "Standard: 80", maxBatchLengthLabel: "Maximale Batch-Länge (Zeichen):", maxBatchLengthHelp: "Maximale Gesamtzeichen pro API-Anfrage (Batch). Verhindert das Überschreiten der API-Eingabegrenzen.", maxBatchLengthPlaceholder: "Standard: 5000", delayBetweenRequestsLabel: "Verzögerung zwischen Anfragen (ms):", delayBetweenRequestsHelp: "Wartezeit zwischen API-Aufrufen. Längere Verzögerungen können helfen, Ratenbegrenzungsfehler zu vermeiden.", delayBetweenRequestsPlaceholder: "Standard: 2500", maxTokenLabel: "Maximale Ausgabe-Token:", maxTokenHelp: "Maximale Länge des übersetzten Textes, der von der API in einer Antwort zurückgegeben wird. Verhindert Abschneiden.", maxTokenPlaceholder: "Standard: 8192", concurrencyLimitLabel: "Gleichzeitigkeitslimit:", concurrencyLimitHelp: "Maximale Anzahl parallel zu verarbeitender API-Anfragen. Höhere Werte können die Übersetzung beschleunigen, erhöhen jedoch das Risiko von API-Ratenbegrenzungsfehlern.", concurrencyLimitPlaceholder: "Standard: 10", maxRetriesLabel: "Maximale Wiederholungsversuche bei Fehlern:", maxRetriesHelp: "Maximale Anzahl von Wiederholungsversuchen für eine API-Anfrage bei einem Fehler (ausgenommen Ratenbegrenzungsfehler). Verwendet exponentielles Backoff mit Jitter.", maxRetriesPlaceholder: "Standard: 3", timeoutLabel: "API-Anfrage-Timeout (Sekunden):", timeoutHelp: "Maximale Wartezeit auf eine API-Antwort. Längere Timeouts sind nützlich für langsame Modelle oder Netzwerke.", timeoutPlaceholder: "Standard: 300", ollamaUnloadLabel: "Ollama-Modell nach Anfrage entladen:", ollamaUnloadHelp: "(Nur Ollama) Wenn aktiviert, wird das Modell nach jeder Übersetzungsanfrage aus dem Speicher entladen, um Ressourcen zu sparen. Dies kann nachfolgende Übersetzungen verlangsamen.", toggleBlueBackgroundLabel: "Blauer Hintergrund für übersetzten Text:", toggleBlueBackgroundHelp: "Schalten Sie um, ob ein blauer Hintergrund auf übersetzte Texte angewendet werden soll.", autoTranslationLabel: "Automatische Übersetzung:", autoTranslationHelp: "Wenn aktiviert, werden die zu übersetzenden Texte automatisch übersetzt.", showProgressPopupLabel: "Fortschritts-Popup anzeigen:", showProgressPopupHelp: "Schalten Sie um, ob ein Popup während der Übersetzung angezeigt werden soll.", hidePromptAllSitesLabel: "Übersetzungsaufforderung für alle Seiten ausblenden:", hidePromptAllSitesHelp: "Wenn aktiviert, erscheint die Übersetzungsaufforderung auf keiner Seite.", excludeListLabel: "Liste der auszuschließenden Websites:", excludeListHelp: "Geben Sie jede URL in einer neuen Zeile ein. Die hier aufgeführten Websites werden nicht automatisch übersetzt.", saveBtn: "Einstellungen speichern", savedSettings: "Einstellungen gespeichert!", supportLink: "Kontaktieren Sie uns", cancelling: "Abbrechen..." },
-    es: { pageTitle: "Configuración del traductor de sitios web LLM", header: "Configuración del traductor de sitios web LLM", apiProviderLabel: "Proveedor de API:", apiProviderHelp: "Elija el proveedor de API para usar en la traducción.", apiKeyLabel: "Clave API:", apiEndpointLabel: "URL del punto final de la API:", apiKeyHelpGemini: 'Obtenga su clave API en <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>', apiKeyHelpOpenAI: 'Obtenga su clave API en <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>', apiKeyHelpDeepSeek: 'Obtenga su clave API en <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>', apiKeyHelpAnthropic: 'Obtenga su clave API en <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>', apiKeyHelpXAI: 'Obtenga su clave API en <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>', apiKeyHelpOllama: "Ingrese su clave API de Ollama (opcional). <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>", apiKeyHelpLMStudio: "Ingrese su clave API de LM Studio (opcional). <br><i>Nota: La clave API se almacena localmente en su PC. Tenga cuidado al usarla en computadoras compartidas.</i>", apiEndpointHelpOllama: "Ingrese la URL de su punto final de API de Ollama.", apiEndpointHelpLMStudio: "Ingrese la URL de su punto final de API de LM Studio.", apiKeyPlaceholderGemini: "Ingrese su clave API de Gemini", apiKeyPlaceholderOpenAI: "Ingrese su clave API de OpenAI", apiKeyPlaceholderDeepSeek: "Ingrese su clave API de DeepSeek", apiKeyPlaceholderAnthropic: "Ingrese su clave API de Anthropic", apiKeyPlaceholderXAI: "Ingrese su clave API de xAI", apiKeyPlaceholderOllama: "Ingrese su clave API de Ollama (opcional)", apiKeyPlaceholderLMStudio: "Ingrese su clave API de LM Studio (opcional)", apiEndpointPlaceholderOllama: "ejemplo: http://localhost:11434", apiEndpointPlaceholderLMStudio: "ejemplo: http://localhost:1234", aiModelLabel: "Modelo de IA:", aiModelHelpGemini: "Si se deja en blanco, se usará gemini-flash-lite-latest. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelHelpOpenAI: "Si se deja en blanco, se usará gpt-5-nano. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelHelpDeepSeek: "Si se deja en blanco, se usará deepseek-chat. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelHelpAnthropic: "Si se deja en blanco, se usará claude-sonnet-4-5-20250929. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelHelpXAI: "Si se deja en blanco, se usará grok-4-fast-non-reasoning. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelHelpOllama: "Ingrese el nombre del modelo a usar con Ollama (ejemplo: llama3).Recomendamos modelos con un rendimiento de inferencia equivalente o superior a gemma-3-12b. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelHelpLMStudio: "Ingrese el nombre del modelo cargado en LM Studio.Recomendamos modelos con un rendimiento de inferencia equivalente o superior a gemma-3-12b. <i>La precisión y la velocidad de la traducción se ven muy afectadas por las capacidades y características del modelo utilizado.</i>", aiModelPlaceholderGemini: "ejemplo: gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "ejemplo: gpt-5-nano", aiModelPlaceholderDeepSeek: "ejemplo: deepseek-chat", aiModelPlaceholderAnthropic: "ejemplo: claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "ejemplo: grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "ejemplo: llama3", aiModelPlaceholderLMStudio: "ejemplo: nombre-modelo-cargado", batchSizeLabel: "Tamaño del lote (número de textos):", batchSizeHelp: "Número máximo de fragmentos de texto por solicitud de API. Valores más grandes pueden ser más rápidos pero pueden causar errores.", batchSizePlaceholder: "Predeterminado: 80", maxBatchLengthLabel: "Longitud máxima del lote (caracteres):", maxBatchLengthHelp: "Máximo total de caracteres por solicitud de API (lote). Evita exceder los límites de entrada de la API.", maxBatchLengthPlaceholder: "Predeterminado: 5000", delayBetweenRequestsLabel: "Retraso entre solicitudes (ms):", delayBetweenRequestsHelp: "Tiempo de espera entre llamadas a la API. Retrasos más largos pueden ayudar a evitar errores de límite de tasa.", delayBetweenRequestsPlaceholder: "Predeterminado: 2500", maxTokenLabel: "Máximo de tokens de salida:", maxTokenHelp: "Longitud máxima del texto traducido devuelto por la API en una respuesta. Evita el corte.", maxTokenPlaceholder: "Predeterminado: 8192", concurrencyLimitLabel: "Límite de concurrencia:", concurrencyLimitHelp: "Número máximo de solicitudes de API para procesar en paralelo. Valores más altos pueden acelerar la traducción pero aumentan el riesgo de errores de límite de velocidad de API.", concurrencyLimitPlaceholder: "Predeterminado: 10", maxRetriesLabel: "Máximo de reintentos en caso de error:", maxRetriesHelp: "Número máximo de veces que se reintenta una solicitud de API en caso de fallo (excluyendo errores de límite de velocidad). Utiliza retroceso exponencial con jitter.", maxRetriesPlaceholder: "Predeterminado: 3", timeoutLabel: "Tiempo de espera de solicitud de API (segundos):", timeoutHelp: "Tiempo máximo de espera para una respuesta de API. Tiempos de espera más largos son útiles para modelos o redes lentos.", timeoutPlaceholder: "Predeterminado: 300", ollamaUnloadLabel: "Descargar modelo Ollama después de la solicitud:", ollamaUnloadHelp: "(Solo Ollama) Si está habilitado, el modelo se descargará de la memoria después de cada solicitud de traducción para ahorrar recursos. Esto puede ralentizar las traducciones posteriores.", toggleBlueBackgroundLabel: "Fondo azul para texto traducido:", toggleBlueBackgroundHelp: "Alternar si se debe aplicar un fondo azul a los textos traducidos.", autoTranslationLabel: "Traducción automática:", autoTranslationHelp: "Si está habilitado, los textos a traducir se traducirán automáticamente.", showProgressPopupLabel: "Mostrar ventana emergente de progreso:", showProgressPopupHelp: "Alternar si se debe mostrar una ventana emergente durante la traducción.", hidePromptAllSitesLabel: "Ocultar solicitud de traducción para todos los sitios:", hidePromptAllSitesHelp: "Si está habilitado, la solicitud de traducción no aparecerá en ningún sitio.", excludeListLabel: "Lista de sitios a excluir:", excludeListHelp: "Ingrese cada URL en una nueva línea. Los sitios listados aquí no se traducirán automáticamente.", saveBtn: "Guardar configuración", savedSettings: "¡Configuración guardada!", supportLink: "Contáctenos", cancelling: "Cancelando..." },
-    it: { pageTitle: "Impostazioni del traduttore di siti web LLM", header: "Impostazioni del traduttore di siti web LLM", apiProviderLabel: "Fornitore API:", apiProviderHelp: "Scegli il fornitore API da utilizzare per la traduzione.", apiKeyLabel: "Chiave API:", apiEndpointLabel: "URL endpoint API:", apiKeyHelpGemini: 'Ottieni la tua chiave API da <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>', apiKeyHelpOpenAI: 'Ottieni la tua chiave API da <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>', apiKeyHelpDeepSeek: 'Ottieni la tua chiave API da <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>', apiKeyHelpAnthropic: 'Ottieni la tua chiave API da <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>', apiKeyHelpXAI: 'Ottieni la tua chiave API da <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>', apiKeyHelpOllama: "Inserisci la tua chiave API Ollama (opzionale). <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>", apiKeyHelpLMStudio: "Inserisci la tua chiave API LM Studio (opzionale). <br><i>Nota: la chiave API viene memorizzata localmente sul tuo PC. Si prega di prestare attenzione quando si utilizzano computer condivisi.</i>", apiEndpointHelpOllama: "Inserisci l'URL del tuo endpoint API Ollama.", apiEndpointHelpLMStudio: "Inserisci l'URL del tuo endpoint API LM Studio.", apiKeyPlaceholderGemini: "Inserisci la tua chiave API Gemini", apiKeyPlaceholderOpenAI: "Inserisci la tua chiave API OpenAI", apiKeyPlaceholderDeepSeek: "Inserisci la tua chiave API DeepSeek", apiKeyPlaceholderAnthropic: "Inserisci la tua chiave API Anthropic", apiKeyPlaceholderXAI: "Inserisci la tua chiave API xAI", apiKeyPlaceholderOllama: "Inserisci la tua chiave API Ollama (opzionale)", apiKeyPlaceholderLMStudio: "Inserisci la tua chiave API LM Studio (opzionale)", apiEndpointPlaceholderOllama: "es. http://localhost:11434", apiEndpointPlaceholderLMStudio: "es. http://localhost:1234", aiModelLabel: "Modello AI:", aiModelHelpGemini: "Se lasciato vuoto, verrà utilizzato gemini-flash-lite-latest. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelHelpOpenAI: "Se lasciato vuoto, verrà utilizzato gpt-5-nano. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelHelpDeepSeek: "Se lasciato vuoto, verrà utilizzato deepseek-chat. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelHelpAnthropic: "Se lasciato vuoto, verrà utilizzato claude-sonnet-4-5-20250929. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelHelpXAI: "Se lasciato vuoto, verrà utilizzato grok-4-fast-non-reasoning. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelHelpOllama: "Inserisci il nome del modello da utilizzare con Ollama (es. llama3).Si consigliano modelli con prestazioni di inferenza equivalenti o superiori a gemma-3-12b. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelHelpLMStudio: "Inserisci il nome del modello caricato in LM Studio.Si consigliano modelli con prestazioni di inferenza equivalenti o superiori a gemma-3-12b. <i>L'accuratezza e la velocità della traduzione sono fortemente influenzate dalle capacità e dalle caratteristiche del modello utilizzato.</i>", aiModelPlaceholderGemini: "es. gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "es. gpt-5-nano", aiModelPlaceholderDeepSeek: "es. deepseek-chat", aiModelPlaceholderAnthropic: "es. claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "es. grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "es. llama3", aiModelPlaceholderLMStudio: "es. nome-modello-caricato", batchSizeLabel: "Dimensione del lotto (numero di testi):", batchSizeHelp: "Numero massimo di pezzi di testo per richiesta API. Valori più alti possono essere più veloci ma possono causare errori.", batchSizePlaceholder: "Predefinito: 80", maxBatchLengthLabel: "Lunghezza massima del lotto (caratteri):", maxBatchLengthHelp: "Numero massimo totale di caratteri per richiesta API (lotto). Impedisce il superamento dei limiti di input dell'API.", maxBatchLengthPlaceholder: "Predefinito: 5000", delayBetweenRequestsLabel: "Ritardo tra le richieste (ms):", delayBetweenRequestsHelp: "Tempo di attesa tra le chiamate API. Ritardi più lunghi possono aiutare a evitare errori di limite di tasso.", delayBetweenRequestsPlaceholder: "Predefinito: 2500", maxTokenLabel: "Token massimi di output:", maxTokenHelp: "Lunghezza massima del testo tradotto restituito dall'API in una risposta. Impedisce il troncamento.", maxTokenPlaceholder: "Predefinito: 8192", concurrencyLimitLabel: "Limite di concorrenza:", concurrencyLimitHelp: "Numero massimo di richieste API da elaborare in parallelo. Valori più alti possono velocizzare la traduzione ma aumentano il rischio di errori di limite di velocità API.", concurrencyLimitPlaceholder: "Predefinito: 10", maxRetriesLabel: "Numero massimo di tentativi in caso di errore:", maxRetriesHelp: "Numero massimo di tentativi di ripetizione di una richiesta API in caso di errore (esclusi gli errori di limite di velocità). Utilizza backoff esponenziale con jitter.", maxRetriesPlaceholder: "Predefinito: 3", timeoutLabel: "Timeout richiesta API (secondi):", timeoutHelp: "Tempo massimo di attesa per una risposta API. Timeout più lunghi sono utili per modelli o reti lenti.", timeoutPlaceholder: "Predefinito: 300", ollamaUnloadLabel: "Scarica modello Ollama dopo la richiesta:", ollamaUnloadHelp: "(Solo Ollama) Se abilitato, il modello verrà scaricato dalla memoria dopo ogni richiesta di traduzione per risparmiare risorse. Ciò potrebbe rallentare le traduzioni successive.", toggleBlueBackgroundLabel: "Sfondo blu per il testo tradotto:", toggleBlueBackgroundHelp: "Attiva/disattiva l'applicazione di uno sfondo blu ai testi tradotti.", autoTranslationLabel: "Traduzione automatica:", autoTranslationHelp: "Se abilitato, i testi da tradurre saranno tradotti automaticamente.", showProgressPopupLabel: "Mostra popup di progresso:", showProgressPopupHelp: "Attiva/disattiva la visualizzazione di un popup durante la traduzione.", hidePromptAllSitesLabel: "Nascondi il prompt di traduzione per tutti i siti:", hidePromptAllSitesHelp: "Se abilitato, il prompt di traduzione non apparirà su nessun sito.", excludeListLabel: "Elenco dei siti da escludere:", excludeListHelp: "Inserisci ogni URL su una nuova riga. I siti elencati qui non verranno tradotti automaticamente.", saveBtn: "Salva impostazioni", savedSettings: "Impostazioni salvate!", supportLink: "Contattaci", cancelling: "Annullamento..." },
-    pt: { pageTitle: "Configurações do Tradutor de Sites LLM", header: "Configurações do Tradutor de Sites LLM", apiProviderLabel: "Provedor de API:", apiProviderHelp: "Escolha o provedor de API para usar na tradução.", apiKeyLabel: "Chave API:", apiEndpointLabel: "URL do Endpoint da API:", apiKeyHelpGemini: 'Obtenha sua chave API no <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>', apiKeyHelpOpenAI: 'Obtenha sua chave API no <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>', apiKeyHelpDeepSeek: 'Obtenha sua chave API no <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>', apiKeyHelpAnthropic: 'Obtenha sua chave API no <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>', apiKeyHelpXAI: 'Obtenha sua chave API no <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>', apiKeyHelpOllama: "Digite sua chave API do Ollama (opcional). <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>", apiKeyHelpLMStudio: "Digite sua chave API do LM Studio (opcional). <br><i>Nota: A chave API é armazenada localmente no seu PC. Tenha cuidado ao usar em computadores compartilhados.</i>", apiEndpointHelpOllama: "Digite a URL do seu endpoint da API Ollama.", apiEndpointHelpLMStudio: "Digite a URL do seu endpoint da API LM Studio.", apiKeyPlaceholderGemini: "Digite sua chave API do Gemini", apiKeyPlaceholderOpenAI: "Digite sua chave API do OpenAI", apiKeyPlaceholderDeepSeek: "Digite sua chave API do DeepSeek", apiKeyPlaceholderAnthropic: "Digite sua chave API do Anthropic", apiKeyPlaceholderXAI: "Digite sua chave API do xAI", apiKeyPlaceholderOllama: "Digite sua chave API do Ollama (opcional)", apiKeyPlaceholderLMStudio: "Digite sua chave API do LM Studio (opcional)", apiEndpointPlaceholderOllama: "ex.: http://localhost:11434", apiEndpointPlaceholderLMStudio: "ex.: http://localhost:1234", aiModelLabel: "Modelo de IA:", aiModelHelpGemini: "Se deixado em branco, gemini-flash-lite-latest será usado. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelHelpOpenAI: "Se deixado em branco, gpt-5-nano será usado. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelHelpDeepSeek: "Se deixado em branco, deepseek-chat será usado. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelHelpAnthropic: "Se deixado em branco, claude-sonnet-4-5-20250929 será usado. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelHelpXAI: "Se deixado em branco, grok-4-fast-non-reasoning será usado. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelHelpOllama: "Digite o nome do modelo a ser usado com Ollama (ex.: llama3).Recomendamos modelos com desempenho de inferência equivalente ou superior a gemma-3-12b. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelHelpLMStudio: "Digite o nome do modelo carregado no LM Studio.Recomendamos modelos com desempenho de inferência equivalente ou superior a gemma-3-12b. <i>A precisão e a velocidade da tradução são muito afetadas pelas capacidades e características do modelo utilizado.</i>", aiModelPlaceholderGemini: "ex.: gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "ex.: gpt-5-nano", aiModelPlaceholderDeepSeek: "ex.: deepseek-chat", aiModelPlaceholderAnthropic: "ex.: claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "ex.: grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "ex.: llama3", aiModelPlaceholderLMStudio: "ex.: nome-modelo-carregado", batchSizeLabel: "Tamanho do lote (número de textos):", batchSizeHelp: "Número máximo de trechos de texto por solicitação de API. Valores maiores podem ser mais rápidos, mas podem causar erros.", batchSizePlaceholder: "Padrão: 80", maxBatchLengthLabel: "Comprimento máximo do lote (caracteres):", maxBatchLengthHelp: "Máximo total de caracteres por solicitação de API (lote). Evita exceder os limites de entrada da API.", maxBatchLengthPlaceholder: "Padrão: 5000", delayBetweenRequestsLabel: "Atraso entre solicitações (ms):", delayBetweenRequestsHelp: "Tempo de espera entre chamadas à API. Atrasos mais longos podem ajudar a evitar erros de limite de taxa.", delayBetweenRequestsPlaceholder: "Padrão: 2500", maxTokenLabel: "Máximo de tokens de saída:", maxTokenHelp: "Comprimento máximo do texto traduzido retornado pela API em uma resposta. Evita o corte.", maxTokenPlaceholder: "Padrão: 8192", concurrencyLimitLabel: "Limite de Concorrência:", concurrencyLimitHelp: "Número máximo de solicitações de API para processar em paralelo. Valores mais altos podem acelerar a tradução, mas aumentam o risco de erros de limite de taxa de API.", concurrencyLimitPlaceholder: "Padrão: 10", maxRetriesLabel: "Máximo de tentativas em caso de erro:", maxRetriesHelp: "Número máximo de vezes para tentar novamente uma solicitação de API em caso de falha (excluindo erros de limite de taxa). Usa backoff exponencial com jitter.", maxRetriesPlaceholder: "Padrão: 3", timeoutLabel: "Tempo limite da solicitação da API (segundos):", timeoutHelp: "Tempo máximo de espera por uma resposta da API. Tempos limite mais longos são úteis para modelos ou redes lentas.", timeoutPlaceholder: "Padrão: 300", ollamaUnloadLabel: "Descarregar modelo Ollama após solicitação:", ollamaUnloadHelp: "(Apenas Ollama) Se ativado, o modelo será descarregado da memória após cada solicitação de tradução para economizar recursos. Isso pode tornar as traduções subsequentes mais lentas.", toggleBlueBackgroundLabel: "Fundo azul para texto traduzido:", toggleBlueBackgroundHelp: "Alternar se deve aplicar um fundo azul aos textos traduzidos.", autoTranslationLabel: "Tradução automática:", autoTranslationHelp: "Se habilitado, os textos a serem traduzidos serão traduzidos automaticamente.", showProgressPopupLabel: "Mostrar popup de progresso:", showProgressPopupHelp: "Alternar se deve exibir um popup durante a tradução.", hidePromptAllSitesLabel: "Ocultar prompt de tradução para todos os sites:", hidePromptAllSitesHelp: "Se habilitado, o prompt de tradução não aparecerá em nenhum site.", excludeListLabel: "Lista de sites a excluir:", excludeListHelp: "Digite cada URL em uma nova linha. Os sites listados aqui não serão traduzidos automaticamente.", saveBtn: "Salvar configurações", savedSettings: "Configurações salvas!", supportLink: "Contate-nos", cancelling: "Cancelando..." },
-    ru: { pageTitle: "Настройки переводчика сайтов LLM", header: "Настройки переводчика сайтов LLM", apiProviderLabel: "Провайдер API:", apiProviderHelp: "Выберите провайдера API для использования в переводе.", apiKeyLabel: "API-ключ:", apiEndpointLabel: "URL конечной точки API:", apiKeyHelpGemini: 'Получите ваш API-ключ на <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>', apiKeyHelpOpenAI: 'Получите ваш API-ключ на <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>', apiKeyHelpDeepSeek: 'Получите ваш API-ключ на <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>', apiKeyHelpAnthropic: 'Получите ваш API-ключ на <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>', apiKeyHelpXAI: 'Получите ваш API-ключ на <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>', apiKeyHelpOllama: "Введите ваш API-ключ Ollama (необязательно). <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>", apiKeyHelpLMStudio: "Введите ваш API-ключ LM Studio (необязательно). <br><i>Примечание: API-ключ хранится локально на вашем ПК. Будьте осторожны при использовании на общих компьютерах.</i>", apiEndpointHelpOllama: "Введите URL вашей конечной точки API Ollama.", apiEndpointHelpLMStudio: "Введите URL вашей конечной точки API LM Studio.", apiKeyPlaceholderGemini: "Введите ваш API-ключ Gemini", apiKeyPlaceholderOpenAI: "Введите ваш API-ключ OpenAI", apiKeyPlaceholderDeepSeek: "Введите ваш API-ключ DeepSeek", apiKeyPlaceholderAnthropic: "Введите ваш API-ключ Anthropic", apiKeyPlaceholderXAI: "Введите ваш API-ключ xAI", apiKeyPlaceholderOllama: "Введите ваш API-ключ Ollama (необязательно)", apiKeyPlaceholderLMStudio: "Введите ваш API-ключ LM Studio (необязательно)", apiEndpointPlaceholderOllama: "напр., http://localhost:11434", apiEndpointPlaceholderLMStudio: "напр., http://localhost:1234", aiModelLabel: "Модель ИИ:", aiModelHelpGemini: "Если оставить пустым, будет использоваться gemini-flash-lite-latest. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelHelpOpenAI: "Если оставить пустым, будет использоваться gpt-5-nano. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelHelpDeepSeek: "Если оставить пустым, будет использоваться deepseek-chat. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelHelpAnthropic: "Если оставить пустым, будет использоваться claude-sonnet-4-5-20250929. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelHelpXAI: "Если оставить пустым, будет использоваться grok-4-fast-non-reasoning. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelHelpOllama: "Введите имя модели для использования с Ollama (напр., llama3).Рекомендуются модели с производительностью вывода, эквивалентной или превышающей gemma-3-12b. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelHelpLMStudio: "Введите имя модели, загруженной в LM Studio.Рекомендуются модели с производительностью вывода, эквивалентной или превышающей gemma-3-12b. <i>Точность и скорость перевода сильно зависят от возможностей и характеристик используемой модели.</i>", aiModelPlaceholderGemini: "напр., gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "напр., gpt-5-nano", aiModelPlaceholderDeepSeek: "напр., deepseek-chat", aiModelPlaceholderAnthropic: "напр., claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "напр., grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "напр., llama3", aiModelPlaceholderLMStudio: "напр., имя-загруженной-модели", batchSizeLabel: "Размер пакета (количество текстов):", batchSizeHelp: "Максимальное количество фрагментов текста на один запрос API. Большие значения могут ускорить процесс, но могут вызвать ошибки.", batchSizePlaceholder: "По умолч.: 80", maxBatchLengthLabel: "Макс. длина пакета (символы):", maxBatchLengthHelp: "Максимальное общее количество символов на один запрос API (пакет). Предотвращает превышение входных лимитов API.", maxBatchLengthPlaceholder: "По умолч.: 5000", delayBetweenRequestsLabel: "Задержка между запросами (мс):", delayBetweenRequestsHelp: "Время ожидания между вызовами API. Более длительные задержки могут помочь избежать ошибок ограничения скорости.", delayBetweenRequestsPlaceholder: "По умолч.: 2500", maxTokenLabel: "Макс. выходных токенов:", maxTokenHelp: "Максимальная длина переведенного текста, возвращаемого API в одном ответе. Предотвращает обрезание.", maxTokenPlaceholder: "По умолч.: 8192", concurrencyLimitLabel: "Лимит параллелизма:", concurrencyLimitHelp: "Максимальное количество одновременных запросов API для обработки. Более высокие значения могут ускорить перевод, но увеличивают риск ошибок ограничения скорости API.", concurrencyLimitPlaceholder: "По умолч.: 10", maxRetriesLabel: "Макс. повторов при ошибке:", maxRetriesHelp: "Максимальное количество повторных попыток запроса API в случае сбоя (исключая ошибки ограничения скорости). Используется экспоненциальная задержка с джиттером.", maxRetriesPlaceholder: "По умолч.: 3", timeoutLabel: "Тайм-аут запроса API (секунды):", timeoutHelp: "Максимальное время ожидания ответа API. Более длительные тайм-ауты полезны для медленных моделей или сетей.", timeoutPlaceholder: "По умолч.: 300", ollamaUnloadLabel: "Выгружать модель Ollama после запроса:", ollamaUnloadHelp: "(Только Ollama) Если включено, модель будет выгружена из памяти после каждого запроса на перевод для экономии ресурсов. Это может замедлить последующие переводы.", toggleBlueBackgroundLabel: "Синий фон для переведенного текста:", toggleBlueBackgroundHelp: "Переключить, применять ли синий фон к переведенным текстам.", autoTranslationLabel: "Автоматический перевод:", autoTranslationHelp: "Если включено, тексты для перевода будут переведены автоматически.", showProgressPopupLabel: "Показать всплывающее окно прогресса:", showProgressPopupHelp: "Переключить, отображать ли всплывающее окно во время перевода.", hidePromptAllSitesLabel: "Скрыть приглашение к переводу для всех сайтов:", hidePromptAllSitesHelp: "Если включено, приглашение к переводу не будет отображаться ни на одном сайте.", excludeListLabel: "Список сайтов для исключения:", excludeListHelp: "Введите каждую URL-адрес на новой строке. Сайты, перечисленные здесь, не будут автоматически переводиться.", saveBtn: "Сохранить настройки", savedSettings: "Настройки сохранены!", supportLink: "Свяжитесь с нами", cancelling: "Отмена..." },
-    'zh-CN': { pageTitle: "LLM 网站翻译设置", header: "LLM 网站翻译设置", apiProviderLabel: "API 提供商:", apiProviderHelp: "选择用于翻译的 API 提供商。", apiKeyLabel: "API 密钥:", apiEndpointLabel: "API 端点 URL:", apiKeyHelpGemini: '从 <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a> 获取您的 API 密钥。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>', apiKeyHelpOpenAI: '从 <a href="https://platform.openai.com/" target="_blank">OpenAI</a> 获取您的 API 密钥。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>', apiKeyHelpDeepSeek: '从 <a href="https://deepseek.com/" target="_blank">DeepSeek</a> 获取您的 API 密钥。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>', apiKeyHelpAnthropic: '从 <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a> 获取您的 API 密钥。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>', apiKeyHelpXAI: '从 <a href="https://xai.com/" target="_blank">xAI</a> 获取您的 API 密钥。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>', apiKeyHelpOllama: "输入您的 Ollama API 密钥 (可选)。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>", apiKeyHelpLMStudio: "输入您的 LM Studio API 密钥 (可选)。 <br><i>注意：API 密钥存储在您 PC 的本地。在共享计算机上使用时请小心。</i>", apiEndpointHelpOllama: "输入您的 Ollama API 端点 URL。", apiEndpointHelpLMStudio: "输入您的 LM Studio API 端点 URL。", apiKeyPlaceholderGemini: "输入您的 Gemini API 密钥", apiKeyPlaceholderOpenAI: "输入您的 OpenAI API 密钥", apiKeyPlaceholderDeepSeek: "输入您的 DeepSeek API 密钥", apiKeyPlaceholderAnthropic: "输入您的 Anthropic API 密钥", apiKeyPlaceholderXAI: "输入您的 xAI API 密钥", apiKeyPlaceholderOllama: "输入您的 Ollama API 密钥 (可选)", apiKeyPlaceholderLMStudio: "输入您的 LM Studio API 密钥 (可选)", apiEndpointPlaceholderOllama: "例如：http://localhost:11434", apiEndpointPlaceholderLMStudio: "例如：http://localhost:1234", aiModelLabel: "AI 模型:", aiModelHelpGemini: "如果留空，将使用 gemini-flash-lite-latest。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelHelpOpenAI: "如果留空，将使用 gpt-5-nano。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelHelpDeepSeek: "如果留空，将使用 deepseek-chat。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelHelpAnthropic: "如果留空，将使用 claude-sonnet-4-5-20250929。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelHelpXAI: "如果留空，将使用 grok-4-fast-non-reasoning。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelHelpOllama: "输入要与 Ollama 一起使用的模型名称 (例如：llama3)。我们推荐使用推理性能等于或高于 gemma-3-12b 的模型。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelHelpLMStudio: "输入 LM Studio 中加载的模型名称。我们推荐使用推理性能等于或高于 gemma-3-12b 的模型。<i>※翻译的准确性和速度很大程度上取决于所使用模型的能力和特性。</i>", aiModelPlaceholderGemini: "例如：gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "例如：gpt-5-nano", aiModelPlaceholderDeepSeek: "例如：deepseek-chat", aiModelPlaceholderAnthropic: "例如：claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "例如：grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "例如：llama3", aiModelPlaceholderLMStudio: "例如：已加载模型名称", batchSizeLabel: "批处理大小 (文本数量):", batchSizeHelp: "每个 API 请求的最大文本片段数。较大的值可能更快，但可能导致错误。", batchSizePlaceholder: "默认值: 80", maxBatchLengthLabel: "批处理最大长度 (字符数):", maxBatchLengthHelp: "每个 API 请求（批处理）的最大总字符数。防止超出 API 输入限制。", maxBatchLengthPlaceholder: "默认值: 5000", delayBetweenRequestsLabel: "请求间隔 (毫秒):", delayBetweenRequestsHelp: "API 调用之间的等待时间。较长的等待可以帮助避免请求限制错误。", delayBetweenRequestsPlaceholder: "默认值: 2500", maxTokenLabel: "最大输出令牌数:", maxTokenHelp: "API 在一次响应中返回的翻译文本的最大长度。防止截断。", maxTokenPlaceholder: "默认值: 8192", concurrencyLimitLabel: "并发限制:", concurrencyLimitHelp: "并行处理的最大 API 请求数。较高的值可能会加快翻译速度，但会增加 API 速率限制错误的风险。", concurrencyLimitPlaceholder: "默认值: 10", maxRetriesLabel: "错误时最大重试次数:", maxRetriesHelp: "API 请求失败时的最大重试次数（不包括速率限制错误）。使用带抖动的指数退避。", maxRetriesPlaceholder: "默认值: 3", timeoutLabel: "API 请求超时 (秒):", timeoutHelp: "等待 API 响应的最长时间。较长的超时对于较慢的模型或网络很有用。", timeoutPlaceholder: "默认值: 300", ollamaUnloadLabel: "请求后卸载 Ollama 模型:", ollamaUnloadHelp: "（仅限 Ollama）如果启用，模型将在每次翻译请求后从内存中卸载以节省资源。这可能会减慢后续翻译的速度。", toggleBlueBackgroundLabel: "翻译文本蓝色背景:", toggleBlueBackgroundHelp: "切换是否为翻译后的文本应用蓝色背景。", autoTranslationLabel: "自动翻译:", autoTranslationHelp: "如果启用，将自动翻译需要翻译的文本。", showProgressPopupLabel: "显示进度弹窗:", showProgressPopupHelp: "切换是否在翻译期间显示进度弹窗。", hidePromptAllSitesLabel: "隐藏所有网站的翻译提示:", hidePromptAllSitesHelp: "如果启用，所有网站上都不会显示翻译提示。", excludeListLabel: "排除翻译的网站列表:", excludeListHelp: "每行输入一个 URL。此列表中的网站将不会被自动翻译。", saveBtn: "保存设置", savedSettings: "设置已保存！", supportLink: "联系我们", cancelling: "正在取消..." },
-    'zh-TW': { pageTitle: "LLM 網站翻譯設定", header: "LLM 網站翻譯設定", apiProviderLabel: "API 供應商:", apiProviderHelp: "選擇用於翻譯的 API 供應商。", apiKeyLabel: "API 金鑰:", apiEndpointLabel: "API 端點 URL:", apiKeyHelpGemini: '從 <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a> 獲取您的 API 金鑰。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>', apiKeyHelpOpenAI: '從 <a href="https://platform.openai.com/" target="_blank">OpenAI</a> 獲取您的 API 金鑰。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>', apiKeyHelpDeepSeek: '從 <a href="https://deepseek.com/" target="_blank">DeepSeek</a> 獲取您的 API 金鑰。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>', apiKeyHelpAnthropic: '從 <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a> 獲取您的 API 金鑰。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>', apiKeyHelpXAI: '從 <a href="https://xai.com/" target="_blank">xAI</a> 獲取您的 API 金鑰。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>', apiKeyHelpOllama: "輸入您的 Ollama API 金鑰 (可選)。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>", apiKeyHelpLMStudio: "輸入您的 LM Studio API 金鑰 (可選)。 <br><i>注意：API 金鑰儲存在您 PC 的本機。在共用電腦上使用時請小心。</i>", apiEndpointHelpOllama: "輸入您的 Ollama API 端點 URL。", apiEndpointHelpLMStudio: "輸入您的 LM Studio API 端點 URL。", apiKeyPlaceholderGemini: "輸入您的 Gemini API 金鑰", apiKeyPlaceholderOpenAI: "輸入您的 OpenAI API 金鑰", apiKeyPlaceholderDeepSeek: "輸入您的 DeepSeek API 金鑰", apiKeyPlaceholderAnthropic: "輸入您的 Anthropic API 金鑰", apiKeyPlaceholderXAI: "輸入您的 xAI API 金鑰", apiKeyPlaceholderOllama: "輸入您的 Ollama API 金鑰 (可選)", apiKeyPlaceholderLMStudio: "輸入您的 LM Studio API 金鑰 (可選)", apiEndpointPlaceholderOllama: "例如：http://localhost:11434", apiEndpointPlaceholderLMStudio: "例如：http://localhost:1234", aiModelLabel: "AI 模型:", aiModelHelpGemini: "若留空，將使用 gemini-flash-lite-latest。<i>※翻譯的準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelHelpOpenAI: "若留空，將使用 gpt-5-nano。<i>※翻譯的準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelHelpDeepSeek: "若留空，將使用 deepseek-chat。<i>※翻譯的準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelHelpAnthropic: "若留空，將使用 claude-sonnet-4-5-20250929。<i>※翻譯的準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelHelpXAI: "若留空，將使用 grok-4-fast-non-reasoning。<i>※翻譯の準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelHelpOllama: "輸入要與 Ollama 一起使用的模型名稱 (例如：llama3)。我們推薦使用推論性能等於或高於 gemma-3-12b 的模型。<i>※翻譯的準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelHelpLMStudio: "輸入 LM Studio 中載入的模型名稱。我們推薦使用推論性能等於或高於 gemma-3-12b 的模型。<i>※翻譯的準確性和速度在很大程度上取決於所使用模型的能力和特性。</i>", aiModelPlaceholderGemini: "例如：gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "例如：gpt-5-nano", aiModelPlaceholderDeepSeek: "例如：deepseek-chat", aiModelPlaceholderAnthropic: "例如：claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "例如：grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "例如：llama3", aiModelPlaceholderLMStudio: "例如：已載入模型名稱", batchSizeLabel: "批次大小 (文字數量):", batchSizeHelp: "每個 API 請求的最大文字片段數。較大的值可能更快，但可能導致錯誤。", batchSizePlaceholder: "預設值: 80", maxBatchLengthLabel: "批次最大長度 (字元數):", maxBatchLengthHelp: "每個 API 請求（批次）的最大總字元數。防止超出 API 輸入限制。", maxBatchLengthPlaceholder: "預設值: 5000", delayBetweenRequestsLabel: "請求間隔 (毫秒):", delayBetweenRequestsHelp: "API 呼叫之間的等待時間。較長的等待可以幫助避免請求限制錯誤。", delayBetweenRequestsPlaceholder: "預設值: 2500", maxTokenLabel: "最大輸出權杖數:", maxTokenHelp: "API 在一次回應中返回的翻譯文字的最大長度。防止截斷。", maxTokenPlaceholder: "預設值: 8192", concurrencyLimitLabel: "並行限制:", concurrencyLimitHelp: "並行處理的最大 API 請求數。較高的值可能會加快翻譯速度，但會增加 API 速率限制錯誤的風險。", concurrencyLimitPlaceholder: "預設值: 10", maxRetriesLabel: "錯誤時最大重試次數:", maxRetriesHelp: "API 請求失敗時的最大重試次數（不包括速率限制錯誤）。使用帶抖動的指數退避。", maxRetriesPlaceholder: "預設值: 3", timeoutLabel: "API 請求超時 (秒):", timeoutHelp: "等待 API 回應的最長時間。較長的超時對於較慢的模型或網路很有用。", timeoutPlaceholder: "預設值: 300", ollamaUnloadLabel: "請求後卸載 Ollama 模型:", ollamaUnloadHelp: "（僅限 Ollama）若啟用，模型將在每次翻譯請求後從記憶體中卸載以節省資源。這可能會減慢後續翻譯的速度。", toggleBlueBackgroundLabel: "翻譯文字藍色背景:", toggleBlueBackgroundHelp: "切換是否為翻譯後的文字應用藍色背景。", autoTranslationLabel: "自動翻譯:", autoTranslationHelp: "若啟用，將自動翻譯需要翻譯的文字。", showProgressPopupLabel: "顯示進度彈窗:", showProgressPopupHelp: "切換是否在翻譯期間顯示進度彈窗。", hidePromptAllSitesLabel: "隱藏所有網站的翻譯提示:", hidePromptAllSitesHelp: "若啟用，所有網站上都不會顯示翻譯提示。", excludeListLabel: "排除翻譯的網站清單:", excludeListHelp: "每行輸入一個 URL。此清單中的網站將不會被自動翻譯。", saveBtn: "儲存設定", savedSettings: "設定已儲存！", supportLink: "聯絡我們", cancelling: "正在取消..." },
-    ko: { pageTitle: "LLM 웹사이트 번역 설정", header: "LLM 웹사이트 번역 설정", apiProviderLabel: "API 제공자:", apiProviderHelp: "번역에 사용할 API 제공자를 선택하세요.", apiKeyLabel: "API 키:", apiEndpointLabel: "API 엔드포인트 URL:", apiKeyHelpGemini: '<a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>에서 API 키를 받으세요. <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>', apiKeyHelpOpenAI: '<a href="https://platform.openai.com/" target="_blank">OpenAI</a>에서 API 키를 받으세요. <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>', apiKeyHelpDeepSeek: '<a href="https://deepseek.com/" target="_blank">DeepSeek</a>에서 API 키를 받으세요. <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>', apiKeyHelpAnthropic: '<a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>에서 API 키를 받으세요. <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>', apiKeyHelpXAI: '<a href="https://xai.com/" target="_blank">xAI</a>에서 API 키를 받으세요. <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>', apiKeyHelpOllama: "Ollama API 키를 입력하세요 (선택 사항). <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>", apiKeyHelpLMStudio: "LM Studio API 키를 입력하세요 (선택 사항). <br><i>참고: API 키는 PC에 로컬로 저장됩니다. 공유 컴퓨터에서 사용할 때 주의하십시오.</i>", apiEndpointHelpOllama: "Ollama API 엔드포인트 URL을 입력하세요.", apiEndpointHelpLMStudio: "LM Studio API 엔드포인트 URL을 입력하세요.", apiKeyPlaceholderGemini: "Gemini API 키를 입력하세요", apiKeyPlaceholderOpenAI: "OpenAI API 키를 입력하세요", apiKeyPlaceholderDeepSeek: "DeepSeek API 키를 입력하세요", apiKeyPlaceholderAnthropic: "Anthropic API 키를 입력하세요", apiKeyPlaceholderXAI: "xAI API 키를 입력하세요", apiKeyPlaceholderOllama: "Ollama API 키 입력 (선택)", apiKeyPlaceholderLMStudio: "LM Studio API 키 입력 (선택)", apiEndpointPlaceholderOllama: "예: http://localhost:11434", apiEndpointPlaceholderLMStudio: "예: http://localhost:1234", aiModelLabel: "AI 모델:", aiModelHelpGemini: "비워두면 gemini-flash-lite-latest가 사용됩니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelHelpOpenAI: "비워두면 gpt-5-nano가 사용됩니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelHelpDeepSeek: "비워두면 deepseek-chat가 사용됩니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelHelpAnthropic: "비워두면 claude-sonnet-4-5-20250929가 사용됩니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelHelpXAI: "비워두면 grok-4-fast-non-reasoning가 사용됩니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelHelpOllama: "Ollama에서 사용할 모델 이름을 입력하세요 (예: llama3).gemma-3-12b 이상의 추론 성능을 가진 모델을 권장합니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelHelpLMStudio: "LM Studio에 로드된 모델 이름을 입력하세요.gemma-3-12b 이상의 추론 성능을 가진 모델을 권장합니다. <i>※번역의 정확도와 속도는 사용되는 모델의 능력과 특성에 크게 영향을 받습니다.</i>", aiModelPlaceholderGemini: "예: gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "예: gpt-5-nano", aiModelPlaceholderDeepSeek: "예: deepseek-chat", aiModelPlaceholderAnthropic: "예: claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "예: grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "예: llama3", aiModelPlaceholderLMStudio: "예: 로드된-모델-이름", batchSizeLabel: "배치 크기 (텍스트 수):", batchSizeHelp: "API 요청당 최대 텍스트 조각 수. 값이 클수록 빠를 수 있지만 오류가 발생할 수 있습니다.", batchSizePlaceholder: "기본값: 80", maxBatchLengthLabel: "최대 배치 길이 (문자 수):", maxBatchLengthHelp: "API 요청(배치)당 최대 총 문자 수. API 입력 제한 초과를 방지합니다.", maxBatchLengthPlaceholder: "기본값: 5000", delayBetweenRequestsLabel: "요청 간격 (ms):", delayBetweenRequestsHelp: "API 호출 간 대기 시간. 대기 시간이 길면 요청 제한 오류를 피할 수 있습니다.", delayBetweenRequestsPlaceholder: "기본값: 2500", maxTokenLabel: "최대 출력 토큰:", maxTokenHelp: "API가 한 번의 응답으로 반환하는 번역된 텍스트의 최대 길이. 잘림을 방지합니다.", maxTokenPlaceholder: "기본값: 8192", concurrencyLimitLabel: "동시성 제한:", concurrencyLimitHelp: "병렬로 처리할 최대 API 요청 수입니다. 값이 높을수록 번역 속도가 빨라질 수 있지만 API 속도 제한 오류의 위험이 증가합니다.", concurrencyLimitPlaceholder: "기본값: 10", maxRetriesLabel: "오류 시 최대 재시도 횟수:", maxRetriesHelp: "API 요청 실패 시 최대 재시도 횟수 (속도 제한 오류 제외). 지터가 포함된 지수 백오프를 사용합니다.", maxRetriesPlaceholder: "기본값: 3", timeoutLabel: "API 요청 시간 초과 (초):", timeoutHelp: "API 응답을 기다리는 최대 시간입니다. 느린 모델이나 네트워크에 긴 시간 초과가 유용합니다.", timeoutPlaceholder: "기본값: 300", ollamaUnloadLabel: "요청 후 Ollama 모델 언로드:", ollamaUnloadHelp: "(Ollama만 해당) 활성화하면 리소스를 절약하기 위해 각 번역 요청 후 모델이 메모리에서 언로드됩니다. 이로 인해 후속 번역 속도가 느려질 수 있습니다.", toggleBlueBackgroundLabel: "번역된 텍스트 파란색 배경:", toggleBlueBackgroundHelp: "번역된 텍스트에 파란색 배경을 적용할지 여부를 전환합니다.", autoTranslationLabel: "자동 번역:", autoTranslationHelp: "켜면 번역 대상 텍스트가 자동으로 번역됩니다.", showProgressPopupLabel: "진행 상황 팝업 표시:", showProgressPopupHelp: "번역 중 진행 상황을 보여주는 팝업을 표시할지 여부를 전환합니다.", hidePromptAllSitesLabel: "모든 사이트에서 번역 확인 비표시:", hidePromptAllSitesHelp: "활성화하면 모든 사이트에서 번역 확인 팝업이 표시되지 않습니다.", excludeListLabel: "번역 제외 사이트 목록:", excludeListHelp: "각 URL을 줄 바꿈으로 구분하여 입력하세요. 이 목록의 사이트는 자동 번역되지 않습니다.", saveBtn: "설정 저장", savedSettings: "설정이 저장되었습니다!", supportLink: "문의하기", cancelling: "취소 중..." },
-    hi: { pageTitle: "LLM वेबसाइट अनुवादक सेटिंग्स", header: "LLM वेबसाइट अनुवादक सेटिंग्स", apiProviderLabel: "API प्रदाता:", apiProviderHelp: "अनुवाद के लिए उपयोग करने के लिए API प्रदाता का चयन करें।", apiKeyLabel: "API कुंजी:", apiEndpointLabel: "API एंडपॉइंट URL:", apiKeyHelpGemini: '<a href="https://ai.google.dev/" target="_blank">Google AI Studio</a> से अपनी API कुंजी प्राप्त करें। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>', apiKeyHelpOpenAI: '<a href="https://platform.openai.com/" target="_blank">OpenAI</a> से अपनी API कुंजी प्राप्त करें। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>', apiKeyHelpDeepSeek: '<a href="https://deepseek.com/" target="_blank">DeepSeek</a> से अपनी API कुंजी प्राप्त करें। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>', apiKeyHelpAnthropic: '<a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a> से अपनी API कुंजी प्राप्त करें। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>', apiKeyHelpXAI: '<a href="https://xai.com/" target="_blank">xAI</a> से अपनी API कुंजी प्राप्त करें। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>', apiKeyHelpOllama: "अपनी Ollama API कुंजी दर्ज करें (वैकल्पिक)। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>", apiKeyHelpLMStudio: "अपनी LM Studio API कुंजी दर्ज करें (वैकल्पिक)। <br><i>ध्यान दें: API कुंजी आपके पीसी पर स्थानीय रूप से संग्रहीत है। साझा कंप्यूटर पर उपयोग करते समय कृपया सतर्क रहें।</i>", apiEndpointHelpOllama: "अपने Ollama API एंडपॉइंट का URL दर्ज करें।", apiEndpointHelpLMStudio: "अपने LM Studio API एंडपॉइंट का URL दर्ज करें।", apiKeyPlaceholderGemini: "अपनी जेमिनी API कुंजी दर्ज करें", apiKeyPlaceholderOpenAI: "अपनी OpenAI API कुंजी दर्ज करें", apiKeyPlaceholderDeepSeek: "अपनी DeepSeek API कुंजी दर्ज करें", apiKeyPlaceholderAnthropic: "अपनी Anthropic API कुंजी दर्ज करें", apiKeyPlaceholderXAI: "अपनी xAI API कुंजी दर्ज करें", apiKeyPlaceholderOllama: "अपनी Ollama API कुंजी दर्ज करें (वैकल्पिक)", apiKeyPlaceholderLMStudio: "अपनी LM Studio API कुंजी दर्ज करें (वैकल्पिक)", apiEndpointPlaceholderOllama: "जैसे, http://localhost:11434", apiEndpointPlaceholderLMStudio: "जैसे, http://localhost:1234", aiModelLabel: "AI मॉडल:", aiModelHelpGemini: "यदि खाली छोड़ दिया जाता है, तो gemini-flash-lite-latest का उपयोग किया जाएगा। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelHelpOpenAI: "यदि खाली छोड़ दिया जाता है, तो gpt-5-nano का उपयोग किया जाएगा। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelHelpDeepSeek: "यदि खाली छोड़ दिया जाता है, तो deepseek-chat का उपयोग किया जाएगा। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelHelpAnthropic: "यदि खाली छोड़ दिया जाता है, तो claude-sonnet-4-5-20250929 का उपयोग किया जाएगा। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelHelpXAI: "यदि खाली छोड़ दिया जाता है, तो grok-4-fast-non-reasoning का उपयोग किया जाएगा। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelHelpOllama: "Ollama के साथ उपयोग करने के लिए मॉडल का नाम दर्ज करें (जैसे, llama3)।हम gemma-3-12b के बराबर বা তার বেশি अनुमान प्रदर्शन वाले मॉडल की सलाह देते हैं। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelHelpLMStudio: "LM Studio में लोड किए गए मॉडल का नाम दर्ज करें।हम gemma-3-12b के बराबर বা তার বেশি अनुमान प्रदर्शन वाले मॉडल की सलाह देते हैं। <i>अनुवाद की सटीकता और गति उपयोग किए गए मॉडल की क्षमताओं और विशेषताओं से बहुत प्रभावित होती है।</i>", aiModelPlaceholderGemini: "जैसे, gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "जैसे, gpt-5-nano", aiModelPlaceholderDeepSeek: "जैसे, deepseek-chat", aiModelPlaceholderAnthropic: "जैसे, claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "जैसे, grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "जैसे, llama3", aiModelPlaceholderLMStudio: "जैसे, लोड-मॉडल-नाम", batchSizeLabel: "बैच आकार (पाठों की संख्या):", batchSizeHelp: "प्रति एपीआई अनुरोध पाठ के टुकड़ों की अधिकतम संख्या। बड़े मान तेज़ हो सकते हैं लेकिन त्रुटियों का कारण बन सकते हैं।", batchSizePlaceholder: "डिफ़ॉल्ट: 80", maxBatchLengthLabel: "अधिकतम बैच लंबाई (अक्षर):", maxBatchLengthHelp: "प्रति एपीआई अनुरोध (बैच) कुल वर्णों की अधिकतम संख्या। एपीआई इनपुट सीमा से अधिक होने से रोकता है।", maxBatchLengthPlaceholder: "डिफ़ॉल्ट: 5000", delayBetweenRequestsLabel: "अनुरोधों के बीच विलंब (मिलीसेकंड):", delayBetweenRequestsHelp: "API कॉल के बीच प्रतीक्षा समय। लंबे विलंब दर सीमा त्रुटियों से बचने में मदद कर सकते हैं।", delayBetweenRequestsPlaceholder: "डिफ़ॉल्ट: 2500", maxTokenLabel: "अधिकतम आउटपुट टोकन:", maxTokenHelp: "एपीआई द्वारा एक प्रतिक्रिया में लौटाए गए अनुवादित पाठ की अधिकतम लंबाई। कटऑफ को रोकता है।", maxTokenPlaceholder: "डिफ़ॉल्ट: 8192", concurrencyLimitLabel: "समवर्ती सीमा:", concurrencyLimitHelp: "समानांतर में संसाधित करने के लिए अधिकतम एपीआई अनुरोधों की संख्या। उच्च मान अनुवाद को गति दे सकते हैं लेकिन एपीआई दर सीमा त्रुटियों का खतरा बढ़ाते हैं।", concurrencyLimitPlaceholder: "डिफ़ॉल्ट: 10", maxRetriesLabel: "त्रुटि पर अधिकतम पुनः प्रयास:", maxRetriesHelp: "विफलता पर एपीआई अनुरोध को पुनः प्रयास करने की अधिकतम संख्या (दर सीमा त्रुटियों को छोड़कर)। जिटर के साथ एक्सपोनेंशियल बैकऑफ़ का उपयोग करता है।", maxRetriesPlaceholder: "डिफ़ॉल्ट: 3", timeoutLabel: "API अनुरोध टाइमआउट (सेकंड):", timeoutHelp: "API प्रतिक्रिया की प्रतीक्षा करने का अधिकतम समय। धीमे मॉडल বা नेटवर्क के लिए लंबे टाइमआउट उपयोगी होते हैं।", timeoutPlaceholder: "डिफ़ॉल्ट: 300", ollamaUnloadLabel: "अनुरोध के बाद ओलामा मॉडल अनलोड करें:", ollamaUnloadHelp: "(केवल ओलामा) यदि सक्षम किया गया है, तो संसाधनों को बचाने के लिए प्रत्येक अनुवाद अनुरोध के बाद मॉडल को मेमोरी से अनलोड किया जाएगा। यह बाद के अनुवादों को धीमा कर सकता है।", toggleBlueBackgroundLabel: "अनुवादित पाठ का नीला पृष्ठभूमि:", toggleBlueBackgroundHelp: "अनुवादित पाठों पर नीला पृष्ठभूमि लागू करना है या नहीं।", autoTranslationLabel: "स्वचालित अनुवाद:", autoTranslationHelp: "यदि सक्षम है, तो अनुवाद करने के लिए पाठ स्वचालित रूप से अनुवादित किए जाएंगे।", showProgressPopupLabel: "प्रगति पॉपअप दिखाएं:", showProgressPopupHelp: "अनुवाद के दौरान प्रगति दिखाने वाले पॉपअप को प्रदर्शित करना है या नहीं।", hidePromptAllSitesLabel: "सभी साइटों के लिए अनुवाद संकेत छिपाएं:", hidePromptAllSitesHelp: "यदि सक्षम है, तो किसी भी साइट पर अनुवाद संकेत दिखाई नहीं देगा।", excludeListLabel: "बहिष्कृत साइटों की सूची:", excludeListHelp: "प्रत्येक URL को एक नई पंक्ति पर दर्ज करें। यहाँ सूचीबद्ध साइटें स्वचालित रूप से अनुवादित नहीं की जाएंगी।", saveBtn: "सेटिंग्स सहेजें", savedSettings: "सेटिंग्स सहेजी गईं!", supportLink: "हमसे संपर्क करें", cancelling: "रद्द किया जा रहा है..." },
-    ar: { pageTitle: "إعدادات مترجم مواقع الويب LLM", header: "إعدادات مترجم مواقع الويب LLM", apiProviderLabel: "مزود API:", apiProviderHelp: "اختر مزود API لاستخدامه في الترجمة.", apiKeyLabel: "مفتاح API:", apiEndpointLabel: "عنوان URL لنقطة نهاية API:", apiKeyHelpGemini: 'احصل على مفتاح API الخاص بك من <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>', apiKeyHelpOpenAI: 'احصل على مفتاح API الخاص بك من <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>', apiKeyHelpDeepSeek: 'احصل على مفتاح API الخاص بك من <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>', apiKeyHelpAnthropic: 'احصل على مفتاح API الخاص بك من <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>', apiKeyHelpXAI: 'احصل على مفتاح API الخاص بك من <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>', apiKeyHelpOllama: "أدخل مفتاح API الخاص بك لـ Ollama (اختياري). <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>", apiKeyHelpLMStudio: "أدخل مفتاح API الخاص بك لـ LM Studio (اختياري). <br><i>ملاحظة: يتم تخزين مفتاح API محليًا على جهاز الكمبيوتر الخاص بك. يرجى توخي الحذر عند الاستخدام على أجهزة الكمبيوتر المشتركة.</i>", apiEndpointHelpOllama: "أدخل عنوان URL لنقطة نهاية API الخاصة بـ Ollama.", apiEndpointHelpLMStudio: "أدخل عنوان URL لنقطة نهاية API الخاصة بـ LM Studio.", apiKeyPlaceholderGemini: "أدخل مفتاح API الخاص بك لـ Gemini", apiKeyPlaceholderOpenAI: "أدخل مفتاح API الخاص بك لـ OpenAI", apiKeyPlaceholderDeepSeek: "أدخل مفتاح API الخاص بك لـ DeepSeek", apiKeyPlaceholderAnthropic: "أدخل مفتاح API الخاص بك لـ Anthropic", apiKeyPlaceholderXAI: "أدخل مفتاح API الخاص بك لـ xAI", apiKeyPlaceholderOllama: "أدخل مفتاح API الخاص بك لـ Ollama (اختياري)", apiKeyPlaceholderLMStudio: "أدخل مفتاح API الخاص بك لـ LM Studio (اختياري)", apiEndpointPlaceholderOllama: "مثل، http://localhost:11434", apiEndpointPlaceholderLMStudio: "مثل، http://localhost:1234", aiModelLabel: "نموذج AI:", aiModelHelpGemini: "إذا تُرك فارغًا، سيتم استخدام gemini-flash-lite-latest. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelHelpOpenAI: "إذا تُرك فارغًا، سيتم استخدام gpt-5-nano. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelHelpDeepSeek: "إذا تُرك فارغًا، سيتم استخدام deepseek-chat. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelHelpAnthropic: "إذا تُرك فارغًا، سيتم استخدام claude-sonnet-4-5-20250929. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelHelpXAI: "إذا تُرك فارغًا، سيتم استخدام grok-4-fast-non-reasoning. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelHelpOllama: "أدخل اسم النموذج لاستخدامه مع Ollama (مثل، llama3).نوصي بالنماذج ذات أداء الاستدلال المكافئ أو الأعلى من gemma-3-12b. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelHelpLMStudio: "أدخل اسم النموذج المحمل في LM Studio.نوصي بالنماذج ذات أداء الاستدلال المكافئ أو الأعلى من gemma-3-12b. <i>تتأثر دقة الترجمة وسرعتها بشكل كبير بقدرات وخصائص النموذج المستخدم.</i>", aiModelPlaceholderGemini: "مثل، gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "مثل، gpt-5-nano", aiModelPlaceholderDeepSeek: "مثل، deepseek-chat", aiModelPlaceholderAnthropic: "مثل، claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "مثل، grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "مثل، llama3", aiModelPlaceholderLMStudio: "مثل، اسم-النموذج-المحمل", batchSizeLabel: "حجم الدفعة (عدد النصوص):", batchSizeHelp: "الحد الأقصى لعدد أجزاء النص لكل طلب API. قد تكون القيم الأعلى أسرع ولكنها قد تسبب أخطاء.", batchSizePlaceholder: "الافتراضي: 80", maxBatchLengthLabel: "أقصى طول للدفعة (أحرف):", maxBatchLengthHelp: "الحد الأقصى لعدد الأحرف الإجمالي لكل طلب API (دفعة). يمنع تجاوز حدود إدخال API.", maxBatchLengthPlaceholder: "الافتراضي: 5000", delayBetweenRequestsLabel: "التأخير بين الطلبات (مللي ثانية):", delayBetweenRequestsHelp: "وقت الانتظار بين استدعاءات API. التأخيرات الأطول يمكن أن تساعد في تجنب أخطاء حد السرعة.", delayBetweenRequestsPlaceholder: "الافتراضي: 2500", maxTokenLabel: "الحد الأقصى للرموز المميزة للإخراج:", maxTokenHelp: "الحد الأقصى لطول النص المترجم الذي يتم إرجاعه بواسطة واجهة برمجة التطبيقات في استجابة واحدة. يمنع القطع.", maxTokenPlaceholder: "الافتراضي: 8192", concurrencyLimitLabel: "حد التزامن:", concurrencyLimitHelp: "الحد الأقصى لطلبات API للمعالجة بالتوازي. قد تؤدي القيم الأعلى إلى تسريع الترجمة ولكنها تزيد من خطر أخطاء حد معدل API.", concurrencyLimitPlaceholder: "الافتراضي: 10", maxRetriesLabel: "الحد الأقصى لإعادة المحاولة عند الخطأ:", maxRetriesHelp: "الحد الأقصى لعدد مرات إعادة محاولة طلب API عند الفشل (باستثناء أخطاء حد المعدل). يستخدم التراجع الأسي مع الارتعاش.", maxRetriesPlaceholder: "الافتراضي: 3", timeoutLabel: "مهلة طلب API (ثوانٍ):", timeoutHelp: "أقصى وقت لانتظار استجابة API. تكون المهلات الأطول مفيدة للنماذج أو الشبكات البطيئة.", timeoutPlaceholder: "الافتراضي: 300", ollamaUnloadLabel: "إلغاء تحميل نموذج Ollama بعد الطلب:", ollamaUnloadHelp: "(Ollama فقط) إذا تم تمكينه، فسيتم إلغاء تحميل النموذج من الذاكرة بعد كل طلب ترجمة لتوفير الموارد. قد يؤدي هذا إلى إبطاء الترجمات اللاحقة.", toggleBlueBackgroundLabel: "خلفية زرقاء للنص المترجم:", toggleBlueBackgroundHelp: "تبديل ما إذا كان يجب تطبيق خلفية زرقاء على النصوص المترجمة.", autoTranslationLabel: "الترجمة التلقائية:", autoTranslationHelp: "إذا تم تمكينه، سيتم ترجمة النصوص المراد ترجمتها تلقائيًا.", showProgressPopupLabel: "إظهار نافذة التقدم:", showProgressPopupHelp: "تبديل ما إذا كان يجب عرض نافذة منبثقة أثناء الترجمة.", hidePromptAllSitesLabel: "إخفاء طلب الترجمة لجميع المواقع:", hidePromptAllSitesHelp: "إذا تم تمكينه، فلن يظهر طلب الترجمة على أي موقع.", excludeListLabel: "قائمة المواقع المستبعدة:", excludeListHelp: "أدخل كل URL في سطر جديد. لن يتم ترجمة المواقع المدرجة هنا تلقائيًا.", saveBtn: "حفظ الإعدادات", savedSettings: "تم حفظ الإعدادات!", supportLink: "اتصل بنا", cancelling: "جارٍ الإلغاء..." },
-    bn: { pageTitle: "LLM ওয়েবসাইট অনুবাদক সেটিংস", header: "LLM ওয়েবসাইট অনুবাদক সেটিংস", apiProviderLabel: "API প্রদানকারী:", apiProviderHelp: "অনুবাদের জন্য ব্যবহার করার জন্য API প্রদানকারী নির্বাচন করুন।", apiKeyLabel: "API কী:", apiEndpointLabel: "API এন্ডপয়েন্ট URL:", apiKeyHelpGemini: '<a href="https://ai.google.dev/" target="_blank">Google AI Studio</a> থেকে আপনার API কী পান। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>', apiKeyHelpOpenAI: '<a href="https://platform.openai.com/" target="_blank">OpenAI</a> থেকে আপনার API কী পান। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>', apiKeyHelpDeepSeek: '<a href="https://deepseek.com/" target="_blank">DeepSeek</a> থেকে আপনার API কী পান। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>', apiKeyHelpAnthropic: '<a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a> থেকে আপনার API কী পান। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>', apiKeyHelpXAI: '<a href="https://xai.com/" target="_blank">xAI</a> থেকে আপনার API কী পান। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>', apiKeyHelpOllama: "আপনার Ollama API কী লিখুন (ঐচ্ছিক)। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>", apiKeyHelpLMStudio: "আপনার LM Studio API কী লিখুন (ঐচ্ছিক)। <br><i>দ্রষ্টব্য: API কী আপনার পিসিতে স্থানীয়ভাবে সংরক্ষণ করা হয়। শেয়ার্ড কম্পিউটারে ব্যবহার করার সময় দয়া করে সতর্ক থাকুন।</i>", apiEndpointHelpOllama: "আপনার Ollama API এন্ডপয়েন্টের URL লিখুন।", apiEndpointHelpLMStudio: "আপনার LM Studio API এন্ডপয়েন্টের URL লিখুন।", apiKeyPlaceholderGemini: "আপনার জেমিনি API কী লিখুন", apiKeyPlaceholderOpenAI: "আপনার OpenAI API কী লিখুন", apiKeyPlaceholderDeepSeek: "আপনার DeepSeek API কী লিখুন", apiKeyPlaceholderAnthropic: "আপনার Anthropic API কী লিখুন", apiKeyPlaceholderXAI: "আপনার xAI API কী লিখুন", apiKeyPlaceholderOllama: "আপনার Ollama API কী লিখুন (ঐচ্ছিক)", apiKeyPlaceholderLMStudio: "আপনার LM Studio API কী লিখুন (ঐচ্ছিক)", apiEndpointPlaceholderOllama: "যেমন, http://localhost:11434", apiEndpointPlaceholderLMStudio: "যেমন, http://localhost:1234", aiModelLabel: "AI মডেল:", aiModelHelpGemini: "যদি ফাঁকা রাখা হয়, তবে gemini-flash-lite-latest ব্যবহার করা হবে। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelHelpOpenAI: "যদি ফাঁকা রাখা হয়, তবে gpt-5-nano ব্যবহার করা হবে। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelHelpDeepSeek: "যদি ফাঁকা রাখা হয়, তবে deepseek-chat ব্যবহার করা হবে। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelHelpAnthropic: "যদি ফাঁকা রাখা হয়, তবে claude-sonnet-4-5-20250929 ব্যবহার করা হবে। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelHelpXAI: "যদি ফাঁকা রাখা হয়, তবে grok-4-fast-non-reasoning ব্যবহার করা হবে। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelHelpOllama: "Ollama-এর সাথে ব্যবহার করার জন্য মডেলের নাম লিখুন (যেমন, llama3)।আমরা gemma-3-12b এর সমতুল্য বা তার বেশি অনুমান কর্মক্ষমতা সহ মডেলগুলির সুপারিশ করি। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelHelpLMStudio: "LM Studio-তে লোড করা মডেলের নাম লিখুন।আমরা gemma-3-12b এর সমতুল্য বা তার বেশি অনুমান কর্মক্ষমতা সহ মডেলগুলির সুপারিশ করি। <i>অনুবাদ এর নির্ভুলতা এবং গতি ব্যবহৃত মডেলের ক্ষমতা এবং বৈশিষ্ট্য দ্বারা ব্যাপকভাবে প্রভাবিত হয়।</i>", aiModelPlaceholderGemini: "যেমন, gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "যেমন, gpt-5-nano", aiModelPlaceholderDeepSeek: "যেমন, deepseek-chat", aiModelPlaceholderAnthropic: "যেমন, claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "যেমন, grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "যেমন, llama3", aiModelPlaceholderLMStudio: "যেমন, লোড-করা-মডেল-নাম", batchSizeLabel: "ব্যাচের আকার (টেক্সটের সংখ্যা):", batchSizeHelp: "প্রতি API অনুরোধে টেক্সট খণ্ডের সর্বাধিক সংখ্যা। উচ্চতর মান দ্রুত হতে পারে তবে ত্রুটি সৃষ্টি করতে পারে।", batchSizePlaceholder: "ডিফল্ট: 80", maxBatchLengthLabel: "সর্বাধিক ব্যাচের দৈর্ঘ্য (অক্ষর):", maxBatchLengthHelp: "প্রতি API অনুরোধে (ব্যাচ) সর্বাধিক মোট অক্ষর। API ইনপুট সীমা অতিক্রম করা থেকে বিরত রাখে।", maxBatchLengthPlaceholder: "ডিফল্ট: 5000", delayBetweenRequestsLabel: "অনুরোধের মধ্যে বিলম্ব (মিলিসেকেন্ড):", delayBetweenRequestsHelp: "API কলের মধ্যে অপেক্ষার সময়। দীর্ঘ বিলম্ব হার সীমা ত্রুটি এড়াতে সাহায্য করতে পারে।", delayBetweenRequestsPlaceholder: "ডিফল্ট: 2500", maxTokenLabel: "সর্বাধিক আউটপুট টোকেন:", maxTokenHelp: "API দ্বারা একটি প্রতিক্রিয়াতে ফেরত দেওয়া অনুবাদিত পাঠ্যের সর্বাধিক দৈর্ঘ্য। কাটঅফ প্রতিরোধ করে।", maxTokenPlaceholder: "ডিফল্ট: 8192", concurrencyLimitLabel: "একযোগে সীমা:", concurrencyLimitHelp: "সমান্তরালভাবে প্রক্রিয়া করার জন্য সর্বাধিক API অনুরোধের সংখ্যা। উচ্চতর মান অনুবাদকে দ্রুত করতে পারে তবে API হার সীমা ত্রুটির ঝুঁকি বাড়ায়।", concurrencyLimitPlaceholder: "ডিফল্ট: 10", maxRetriesLabel: "ত্রুটির ক্ষেত্রে সর্বাধিক পুনঃপ্রচেষ্টা:", maxRetriesHelp: "ব্যর্থতার ক্ষেত্রে একটি API অনুরোধ পুনরায় চেষ্টা করার সর্বাধিক সংখ্যা (হার সীমা ত্রুটি বাদে)। জিটার সহ এক্সপোনেনশিয়াল ব্যাকঅফ ব্যবহার করে।", maxRetriesPlaceholder: "ডিফল্ট: 3", timeoutLabel: "API অনুরোধের সময়সীমা (সেকেন্ড):", timeoutHelp: "API প্রতিক্রিয়ার জন্য অপেক্ষা করার সর্বাধিক সময়। ধীর মডেল বা নেটওয়ার্কের জন্য দীর্ঘ সময়সীমা উপযোগী।", timeoutPlaceholder: "ডিফল্ট: 300", ollamaUnloadLabel: "অনুরোধের পরে ওলামা মডেল আনলোড করুন:", ollamaUnloadHelp: "(শুধুমাত্র ওলামা) সক্ষম করা থাকলে, রিসোর্স সংরক্ষণের জন্য প্রতিটি অনুবাদ অনুরোধের পরে মডেলটি মেমরি থেকে আনলোড করা হবে। এটি পরবর্তী অনুবাদগুলিকে ধীর করে দিতে পারে।", toggleBlueBackgroundLabel: "অনুবাদিত টেক্সটের নীল পটভূমি:", toggleBlueBackgroundHelp: "অনুবাদিত টেক্সটে নীল পটভূমি প্রয়োগ করা হবে কিনা তা টগল করুন।", autoTranslationLabel: "স্বয়ংক্রিয় অনুবাদ:", autoTranslationHelp: "যদি সক্ষম করা হয়, তবে অনুবাদ করার জন্য টেক্সটগুলি স্বয়ংক্রিয়ভাবে অনুবাদিত হবে।", showProgressPopupLabel: "অগ্রগতি পপআপ দেখান:", showProgressPopupHelp: "অনুবাদের সময় অগ্রগতি দেখানো পপআপ প্রদর্শন করা হবে কিনা তা টগল করুন।", hidePromptAllSitesLabel: "সমস্ত সাইটের জন্য অনুবাদ প্রম্পট লুকান:", hidePromptAllSitesHelp: "যদি সক্ষম করা হয়, তবে কোনও সাইটে অনুবাদ প্রম্পট প্রদর্শিত হবে না।", excludeListLabel: "বাদ দেওয়া সাইটগুলির তালিকা:", excludeListHelp: "প্রতিটি URL একটি নতুন লাইনে লিখুন। এখানে তালিকাভুক্ত সাইটগুলি স্বয়ংক্রিয়ভাবে অনুবাদিত হবে না।", saveBtn: "সেটিংস সংরক্ষণ করুন", savedSettings: "সেটিংস সংরক্ষিত হয়েছে!", supportLink: "যোগাযোগ করুন", cancelling: "বাতিল করা হচ্ছে..." },
-    id: { pageTitle: "Pengaturan Penerjemah Situs Web LLM", header: "Pengaturan Penerjemah Situs Web LLM", apiProviderLabel: "Penyedia API:", apiProviderHelp: "Pilih penyedia API untuk digunakan dalam penerjemahan.", apiKeyLabel: "Kunci API:", apiEndpointLabel: "URL Endpoint API:", apiKeyHelpGemini: 'Dapatkan kunci API Anda dari <a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>. <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>', apiKeyHelpOpenAI: 'Dapatkan kunci API Anda dari <a href="https://platform.openai.com/" target="_blank">OpenAI</a>. <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>', apiKeyHelpDeepSeek: 'Dapatkan kunci API Anda dari <a href="https://deepseek.com/" target="_blank">DeepSeek</a>. <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>', apiKeyHelpAnthropic: 'Dapatkan kunci API Anda dari <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>. <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>', apiKeyHelpXAI: 'Dapatkan kunci API Anda dari <a href="https://xai.com/" target="_blank">xAI</a>. <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>', apiKeyHelpOllama: "Masukkan kunci API Ollama Anda (opsional). <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>", apiKeyHelpLMStudio: "Masukkan kunci API LM Studio Anda (opsional). <br><i>Catatan: Kunci API disimpan secara lokal di PC Anda. Harap berhati-hati saat menggunakan di komputer bersama.</i>", apiEndpointHelpOllama: "Masukkan URL endpoint API Ollama Anda.", apiEndpointHelpLMStudio: "Masukkan URL endpoint API LM Studio Anda.", apiKeyPlaceholderGemini: "Masukkan kunci API Gemini Anda", apiKeyPlaceholderOpenAI: "Masukkan kunci API OpenAI Anda", apiKeyPlaceholderDeepSeek: "Masukkan kunci API DeepSeek Anda", apiKeyPlaceholderAnthropic: "Masukkan kunci API Anthropic Anda", apiKeyPlaceholderXAI: "Masukkan kunci API xAI Anda", apiKeyPlaceholderOllama: "Masukkan kunci API Ollama Anda (opsional)", apiKeyPlaceholderLMStudio: "Masukkan kunci API LM Studio Anda (opsional)", apiEndpointPlaceholderOllama: "mis., http://localhost:11434", apiEndpointPlaceholderLMStudio: "mis., http://localhost:1234", aiModelLabel: "Model AI:", aiModelHelpGemini: "Jika dibiarkan kosong, gemini-flash-lite-latest akan digunakan. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelHelpOpenAI: "Jika dibiarkan kosong, gpt-5-nano akan digunakan. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelHelpDeepSeek: "Jika dibiarkan kosong, deepseek-chat akan digunakan. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelHelpAnthropic: "Jika dibiarkan kosong, claude-sonnet-4-5-20250929 akan digunakan. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelHelpXAI: "Jika dibiarkan kosong, grok-4-fast-non-reasoning akan digunakan. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelHelpOllama: "Masukkan nama model untuk digunakan dengan Ollama (mis., llama3).Kami merekomendasikan model dengan kinerja inferensi yang setara atau lebih tinggi dari gemma-3-12b. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelHelpLMStudio: "Masukkan nama model yang dimuat di LM Studio.Kami merekomendasikan model dengan kinerja inferensi yang setara atau lebih tinggi dari gemma-3-12b. <i>Akurasi dan kecepatan terjemahan sangat dipengaruhi oleh kemampuan dan karakteristik model yang digunakan.</i>", aiModelPlaceholderGemini: "mis., gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "mis., gpt-5-nano", aiModelPlaceholderDeepSeek: "mis., deepseek-chat", aiModelPlaceholderAnthropic: "mis., claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "mis., grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "mis., llama3", aiModelPlaceholderLMStudio: "mis., nama-model-dimuat", batchSizeLabel: "Ukuran Batch (Jumlah Teks):", batchSizeHelp: "Jumlah maksimum potongan teks per permintaan API. Nilai yang lebih tinggi bisa lebih cepat tetapi dapat menyebabkan kesalahan.", batchSizePlaceholder: "Default: 80", maxBatchLengthLabel: "Panjang Batch Maksimum (Karakter):", maxBatchLengthHelp: "Jumlah maksimum total karakter per permintaan API (batch). Mencegah melebihi batas input API.", maxBatchLengthPlaceholder: "Default: 5000", delayBetweenRequestsLabel: "Penundaan Antara Permintaan (ms):", delayBetweenRequestsHelp: "Waktu tunggu antara panggilan API. Penundaan yang lebih lama dapat membantu menghindari kesalahan batas kecepatan.", delayBetweenRequestsPlaceholder: "Default: 2500", maxTokenLabel: "Token Output Maks:", maxTokenHelp: "Panjang maksimum teks terjemahan yang dikembalikan oleh API dalam satu respons. Mencegah pemotongan.", maxTokenPlaceholder: "Default: 8192", concurrencyLimitLabel: "Batas Konkurensi:", concurrencyLimitHelp: "Jumlah maksimum permintaan API untuk diproses secara paralel. Nilai yang lebih tinggi dapat mempercepat terjemahan tetapi meningkatkan risiko kesalahan batas kecepatan API.", concurrencyLimitPlaceholder: "Default: 10", maxRetriesLabel: "Maks Coba Lagi saat Error:", maxRetriesHelp: "Jumlah maksimum percobaan ulang permintaan API saat gagal (tidak termasuk kesalahan batas kecepatan). Menggunakan backoff eksponensial dengan jitter.", maxRetriesPlaceholder: "Default: 3", timeoutLabel: "Batas Waktu Permintaan API (detik):", timeoutHelp: "Waktu maksimum untuk menunggu respons API. Batas waktu yang lebih lama berguna untuk model atau jaringan yang lambat.", timeoutPlaceholder: "Default: 300", ollamaUnloadLabel: "Bongkar Model Ollama Setelah Permintaan:", ollamaUnloadHelp: "(Hanya Ollama) Jika diaktifkan, model akan dibongkar dari memori setelah setiap permintaan terjemahan untuk menghemat sumber daya. Ini dapat memperlambat terjemahan berikutnya.", toggleBlueBackgroundLabel: "Latar Belakang Biru untuk Teks Terjemahan:", toggleBlueBackgroundHelp: "Beralih apakah akan menerapkan latar belakang biru pada teks terjemahan.", autoTranslationLabel: "Terjemahan Otomatis:", autoTranslationHelp: "Jika diaktifkan, teks yang akan diterjemahkan akan diterjemahkan secara otomatis.", showProgressPopupLabel: "Tampilkan Popup Kemajuan:", showProgressPopupHelp: "Beralih apakah akan menampilkan popup selama penerjemahan.", hidePromptAllSitesLabel: "Sembunyikan Prompt Penerjemahan untuk Semua Situs:", hidePromptAllSitesHelp: "Jika diaktifkan, prompt penerjemahan tidak akan muncul di situs mana pun.", excludeListLabel: "Daftar Situs yang Dikecualikan:", excludeListHelp: "Masukkan setiap URL pada baris baru. Situs yang tercantum di sini tidak akan diterjemahkan secara otomatis.", saveBtn: "Simpan Pengaturan", savedSettings: "Pengaturan disimpan!", supportLink: "Hubungi Kami", cancelling: "Membatalkan..." },
-    tr: { pageTitle: "LLM Web Sitesi Çevirmeni Ayarları", header: "LLM Web Sitesi Çevirmeni Ayarları", apiProviderLabel: "API Sağlayıcı:", apiProviderHelp: "Çeviri için kullanılacak API sağlayıcısını seçin.", apiKeyLabel: "API Anahtarı:", apiEndpointLabel: "API Uç Nokta URL'si:", apiKeyHelpGemini: '<a href="https://ai.google.dev/" target="_blank">Google AI Studio</a>\'dan API anahtarınızı alın. <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>', apiKeyHelpOpenAI: '<a href="https://platform.openai.com/" target="_blank">OpenAI</a>\'dan API anahtarınızı alın. <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>', apiKeyHelpDeepSeek: '<a href="https://deepseek.com/" target="_blank">DeepSeek</a>\'dan API anahtarınızı alın. <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>', apiKeyHelpAnthropic: '<a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a>\'dan API anahtarınızı alın. <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>', apiKeyHelpXAI: '<a href="https://xai.com/" target="_blank">xAI</a>\'dan API anahtarınızı alın. <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>', apiKeyHelpOllama: "Ollama API anahtarınızı girin (isteğe bağlı). <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>", apiKeyHelpLMStudio: "LM Studio API anahtarınızı girin (isteğe bağlı). <br><i>Not: API anahtarı bilgisayarınızda yerel olarak saklanır. Paylaşılan bilgisayarlarda kullanırken lütfen dikkatli olun.</i>", apiEndpointHelpOllama: "Ollama API uç noktanızın URL'sini girin.", apiEndpointHelpLMStudio: "LM Studio API uç noktanızın URL'sini girin.", apiKeyPlaceholderGemini: "Gemini API anahtarınızı girin", apiKeyPlaceholderOpenAI: "OpenAI API anahtarınızı girin", apiKeyPlaceholderDeepSeek: "DeepSeek API anahtarınızı girin", apiKeyPlaceholderAnthropic: "Anthropic API anahtarınızı girin", apiKeyPlaceholderXAI: "xAI API anahtarınızı girin", apiKeyPlaceholderOllama: "Ollama API anahtarınızı girin (isteğe bağlı)", apiKeyPlaceholderLMStudio: "LM Studio API anahtarınızı girin (isteğe bağlı)", apiEndpointPlaceholderOllama: "ör., http://localhost:11434", apiEndpointPlaceholderLMStudio: "ör., http://localhost:1234", aiModelLabel: "AI Modeli:", aiModelHelpGemini: "Boş bırakılırsa, gemini-flash-lite-latest kullanılır. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelHelpOpenAI: "Boş bırakılırsa, gpt-5-nano kullanılır. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelHelpDeepSeek: "Boş bırakılırsa, deepseek-chat kullanılır. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelHelpAnthropic: "Boş bırakılırsa, claude-sonnet-4-5-20250929 kullanılır. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelHelpXAI: "Boş bırakılırsa, grok-4-fast-non-reasoning kullanılır. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelHelpOllama: "Ollama ile kullanılacak model adını girin (ör., llama3).gemma-3-12b'e eşdeğer veya daha yüksek çıkarım performansına sahip modeller öneririz. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelHelpLMStudio: "LM Studio'da yüklenen model adını girin.gemma-3-12b'e eşdeğer veya daha yüksek çıkarım performansına sahip modeller öneririz. <i>Çevirinin doğruluğu ve hızı, kullanılan modelin yeteneklerinden ve özelliklerinden büyük ölçüde etkilenir.</i>", aiModelPlaceholderGemini: "ör., gemini-flash-lite-latest", aiModelPlaceholderOpenAI: "ör., gpt-5-nano", aiModelPlaceholderDeepSeek: "ör., deepseek-chat", aiModelPlaceholderAnthropic: "ör., claude-sonnet-4-5-20250929", aiModelPlaceholderXAI: "ör., grok-4-fast-non-reasoning", aiModelPlaceholderOllama: "ör., llama3", aiModelPlaceholderLMStudio: "ör., yuklenen-model-adi", batchSizeLabel: "Toplu İş Boyutu (Metin Sayısı):", batchSizeHelp: "API isteği başına maksimum metin parçası sayısı. Daha yüksek değerler daha hızlı olabilir ancak hatalara neden olabilir.", batchSizePlaceholder: "Varsayılan: 80", maxBatchLengthLabel: "Maksimum Toplu İş Uzunluğu (Karakter):", maxBatchLengthHelp: "API isteği (toplu iş) başına maksimum toplam karakter sayısı. API giriş sınırlarının aşılmasını önler.", maxBatchLengthPlaceholder: "Varsayılan: 5000", delayBetweenRequestsLabel: "İstekler Arası Gecikme (ms):", delayBetweenRequestsHelp: "API çağrıları arasındaki bekleme süresi. Daha uzun gecikmeler, oran sınır hatalarını önlemeye yardımcı olabilir.", delayBetweenRequestsPlaceholder: "Varsayılan: 2500", maxTokenLabel: "Maksimum Çıkış Tokeni:", maxTokenHelp: "API tarafından tek bir yanıtta döndürülen çevrilmiş metnin maksimum uzunluğu. Kesilmeyi önler.", maxTokenPlaceholder: "Varsayılan: 8192", concurrencyLimitLabel: "Eşzamanlılık Sınırı:", concurrencyLimitHelp: "Paralel olarak işlenecek maksimum API isteği sayısı. Daha yüksek değerler çeviriyi hızlandırabilir ancak API hız sınırı hataları riskini artırır.", concurrencyLimitPlaceholder: "Varsayılan: 10", maxRetriesLabel: "Hata Durumunda Maksimum Yeniden Deneme:", maxRetriesHelp: "Bir API isteğinin başarısız olması durumunda yeniden denenme sayısı üst sınırı (oran sınırı hataları hariç). Jitter ile üstel geri çekilme kullanır.", maxRetriesPlaceholder: "Varsayılan: 3", timeoutLabel: "API İstek Zaman Aşımı (saniye):", timeoutHelp: "Bir API yanıtı için beklenecek maksimum süre. Daha uzun zaman aşımları yavaş modeller veya ağlar için kullanışlıdır.", timeoutPlaceholder: "Varsayılan: 300", ollamaUnloadLabel: "İstekten Sonra Ollama Modelini Kaldır:", ollamaUnloadHelp: "(Yalnızca Ollama) Etkinleştirilirse, kaynakları korumak için her çeviri isteğinden sonra model bellekten kaldırılır. Bu, sonraki çevirileri yavaşlatabilir.", toggleBlueBackgroundLabel: "Çevrilen Metin Mavi Arka Planı:", toggleBlueBackgroundHelp: "Çevrilen metinlere mavi arka plan uygulanmasını değiştirin.", autoTranslationLabel: "Otomatik Çeviri:", autoTranslationHelp: "Etkinleştirilirse, çevrilecek metinler otomatik olarak çevrilecektir.", showProgressPopupLabel: "İlerleme Penceresini Göster:", showProgressPopupHelp: "Çeviri sırasında ilerleme penceresini gösterip göstermemeyi değiştirin.", hidePromptAllSitesLabel: "Tüm Siteler için Çeviri İstemi Gizle:", hidePromptAllSitesHelp: "Etkinleştirilirse, hiçbir sitede çeviri istemi görünmeyecektir.", excludeListLabel: "Hariç Tutulan Sitelerin Listesi:", excludeListHelp: "Her URL'yi yeni bir satıra girin. Burada listelenen siteler otomatik olarak çevrilmeyecektir.", saveBtn: "Ayarları Kaydet", savedSettings: "Ayarlar kaydedildi!", supportLink: "Bize Ulaşın", cancelling: "İptal ediliyor..." }
-};
