@@ -106,6 +106,8 @@
     let promptShadowRoot = null;
     let minimizedDiv = null;
     let fragmentNodeMap = new Map();
+    let fragmentParagraphMap = new Map();
+    let paragraphSpinnerState = new Map();
     let domUpdateQueue = [];
     let isApplyingUpdates = false;
     let providerEntries = [];
@@ -537,6 +539,7 @@
         batchesProcessed = 0;
         expectedTotalFragments = 0;
         translationProgress = 0;
+        clearAllParagraphSpinners();
         domUpdateQueue = [];
         isApplyingUpdates = false;
         const translationMode = options.mode === 'full' ? 'full' : 'visible';
@@ -564,6 +567,7 @@
                 return;
             }
             expectedTotalFragments = selectedFragments.length;
+            registerPendingParagraphs(selectedFragments);
 
             const subBatches = createSubBatches(selectedFragments, config.batchSize || 80, config.maxBatchLength || 5000);
             totalBatches = subBatches.length;
@@ -648,6 +652,7 @@
                 if (Array.isArray(translatedBatch)) {
                     for (const translatedFragment of translatedBatch) {
                         const node = fragmentNodeMap.get(translatedFragment.id);
+                        resolvePendingParagraph(translatedFragment.id);
                         if (node) {
                             applyTranslation(node, translatedFragment.translation);
                         }
@@ -688,6 +693,7 @@
             clearInterval(progressInterval);
             progressInterval = null;
         }
+        clearAllParagraphSpinners();
         chrome.runtime.sendMessage({ action: "translationError", error: errorMessage });
     }
 
@@ -756,6 +762,7 @@
             clearInterval(progressInterval);
             progressInterval = null;
         }
+        clearAllParagraphSpinners();
         updateProgress(lang);
         if (statusShadowRoot) {
             const statusDiv = statusShadowRoot.querySelector('.status');
@@ -1108,6 +1115,107 @@
         }
     }
 
+    function createParagraphSpinner() {
+        const spinner = document.createElement('span');
+        spinner.dataset.translationParagraphSpinner = 'true';
+        spinner.setAttribute('aria-hidden', 'true');
+        spinner.style.display = 'inline-flex';
+        spinner.style.alignItems = 'center';
+        spinner.style.justifyContent = 'center';
+        spinner.style.width = '0.9em';
+        spinner.style.height = '0.9em';
+        spinner.style.marginLeft = '0.35em';
+        spinner.style.verticalAlign = 'text-bottom';
+        spinner.style.border = '2px solid rgba(66, 133, 244, 0.22)';
+        spinner.style.borderTopColor = '#4285f4';
+        spinner.style.borderRadius = '50%';
+        spinner.style.pointerEvents = 'none';
+        spinner.style.flexShrink = '0';
+        if (typeof spinner.animate === 'function') {
+            spinner.animate(
+                [
+                    { transform: 'rotate(0deg)' },
+                    { transform: 'rotate(360deg)' }
+                ],
+                {
+                    duration: 800,
+                    iterations: Infinity,
+                    easing: 'linear'
+                }
+            );
+        }
+        return spinner;
+    }
+
+    function ensureParagraphSpinner(paragraphElement) {
+        if (!(paragraphElement instanceof Element) || !paragraphElement.isConnected) {
+            return null;
+        }
+        let state = paragraphSpinnerState.get(paragraphElement);
+        if (state?.spinner?.isConnected) {
+            return state.spinner;
+        }
+        const spinner = createParagraphSpinner();
+        paragraphElement.appendChild(spinner);
+        if (!state) {
+            state = { remaining: 0, spinner };
+        } else {
+            state.spinner = spinner;
+        }
+        paragraphSpinnerState.set(paragraphElement, state);
+        return spinner;
+    }
+
+    function registerPendingParagraphs(fragments) {
+        if (!Array.isArray(fragments) || fragments.length === 0) {
+            return;
+        }
+        fragments.forEach(fragment => {
+            const paragraphElement = fragment.paragraphElement || document.body;
+            fragmentParagraphMap.set(fragment.id, paragraphElement);
+            if (!(paragraphElement instanceof Element) || !paragraphElement.isConnected) {
+                return;
+            }
+            const state = paragraphSpinnerState.get(paragraphElement) || { remaining: 0, spinner: null };
+            state.remaining += 1;
+            paragraphSpinnerState.set(paragraphElement, state);
+            ensureParagraphSpinner(paragraphElement);
+        });
+    }
+
+    function resolvePendingParagraph(fragmentId) {
+        const paragraphElement = fragmentParagraphMap.get(fragmentId);
+        fragmentParagraphMap.delete(fragmentId);
+        if (!(paragraphElement instanceof Element)) {
+            return;
+        }
+        const state = paragraphSpinnerState.get(paragraphElement);
+        if (!state) {
+            return;
+        }
+        state.remaining = Math.max(0, (state.remaining || 0) - 1);
+        if (state.remaining === 0) {
+            if (state.spinner?.isConnected) {
+                state.spinner.remove();
+            }
+            paragraphSpinnerState.delete(paragraphElement);
+            return;
+        }
+        if (!state.spinner?.isConnected) {
+            state.spinner = ensureParagraphSpinner(paragraphElement);
+        }
+    }
+
+    function clearAllParagraphSpinners() {
+        paragraphSpinnerState.forEach(state => {
+            if (state?.spinner?.isConnected) {
+                state.spinner.remove();
+            }
+        });
+        paragraphSpinnerState.clear();
+        fragmentParagraphMap.clear();
+    }
+
     function toggleAllTranslations() {
         if (isTranslating) return;
         activeObservers.forEach(obs => obs.disconnect());
@@ -1432,6 +1540,7 @@
 
         if (activeTranslationMode === 'visible' && translationStarted && !translationCancelled && viewportTranslationQueued) {
             viewportTranslationQueued = false;
+            clearAllParagraphSpinners();
             isTranslating = false;
             setTimeout(() => {
                 if (translationStarted && !isTranslating && !translationCancelled && activeTranslationMode === 'visible') {
@@ -1477,6 +1586,7 @@
             }
         }
         chrome.runtime.sendMessage({ action: "translationComplete", message: st.translationCompleted });
+        clearAllParagraphSpinners();
         setTimeout(() => {
             if (!isTranslating) {
                 removeStatusIndicator();
